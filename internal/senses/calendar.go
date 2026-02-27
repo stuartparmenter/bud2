@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,19 +20,27 @@ const DefaultCalendarPollInterval = 5 * time.Minute
 // DefaultMeetingReminderBefore is how far ahead to send meeting reminders
 const DefaultMeetingReminderBefore = 15 * time.Minute
 
+// DefaultSprintBriefBefore is how far ahead to send sprint review brief impulses
+const DefaultSprintBriefBefore = 45 * time.Minute
+
+// minSprintReviewsForBrief is the minimum sprint reviews on one day to trigger a brief
+const minSprintReviewsForBrief = 2
+
 // CalendarSense monitors Google Calendar and produces percepts for events
 type CalendarSense struct {
-	client         *calendar.Client
-	onMessage      func(*memory.InboxMessage) // direct callback for message processing
-	pollInterval   time.Duration
-	reminderBefore time.Duration
-	timezone       *time.Location // User's timezone for daily agenda timing
-	statePath      string         // Path to persist state (survives restarts)
+	client           *calendar.Client
+	onMessage        func(*memory.InboxMessage) // direct callback for message processing
+	pollInterval     time.Duration
+	reminderBefore   time.Duration
+	sprintBriefBefore time.Duration
+	timezone         *time.Location // User's timezone for daily agenda timing
+	statePath        string         // Path to persist state (survives restarts)
 
 	// State tracking
 	mu              sync.RWMutex
 	lastPoll        time.Time
 	notifiedEvents  map[string]time.Time // eventID -> when we notified
+	notifiedBriefs  map[string]time.Time // date -> when we sent sprint brief
 	lastDailyAgenda time.Time            // when we last sent daily agenda
 
 	// Control
@@ -46,16 +55,18 @@ type CalendarSense struct {
 // calendarState is the persisted state structure
 type calendarState struct {
 	NotifiedEvents  map[string]time.Time `json:"notified_events"`
+	NotifiedBriefs  map[string]time.Time `json:"notified_briefs"`
 	LastDailyAgenda time.Time            `json:"last_daily_agenda"`
 }
 
 // CalendarConfig holds configuration for the calendar sense
 type CalendarConfig struct {
-	Client         *calendar.Client
-	PollInterval   time.Duration
-	ReminderBefore time.Duration
-	Timezone       *time.Location // User's timezone for daily agenda timing
-	StatePath      string         // Path to persist notification state (prevents duplicates across restarts)
+	Client            *calendar.Client
+	PollInterval      time.Duration
+	ReminderBefore    time.Duration
+	SprintBriefBefore time.Duration  // How far ahead to send sprint review brief impulses (default: 45 min)
+	Timezone          *time.Location // User's timezone for daily agenda timing
+	StatePath         string         // Path to persist notification state (prevents duplicates across restarts)
 }
 
 // NewCalendarSense creates a new calendar sense
@@ -66,19 +77,24 @@ func NewCalendarSense(cfg CalendarConfig, onMessage func(*memory.InboxMessage)) 
 	if cfg.ReminderBefore == 0 {
 		cfg.ReminderBefore = DefaultMeetingReminderBefore
 	}
+	if cfg.SprintBriefBefore == 0 {
+		cfg.SprintBriefBefore = DefaultSprintBriefBefore
+	}
 	if cfg.Timezone == nil {
 		cfg.Timezone = time.UTC // Default to UTC if not specified
 	}
 
 	return &CalendarSense{
-		client:         cfg.Client,
-		onMessage:      onMessage,
-		pollInterval:   cfg.PollInterval,
-		reminderBefore: cfg.ReminderBefore,
-		timezone:       cfg.Timezone,
-		statePath:      cfg.StatePath,
-		notifiedEvents: make(map[string]time.Time),
-		stopChan:       make(chan struct{}),
+		client:            cfg.Client,
+		onMessage:         onMessage,
+		pollInterval:      cfg.PollInterval,
+		reminderBefore:    cfg.ReminderBefore,
+		sprintBriefBefore: cfg.SprintBriefBefore,
+		timezone:          cfg.Timezone,
+		statePath:         cfg.StatePath,
+		notifiedEvents:    make(map[string]time.Time),
+		notifiedBriefs:    make(map[string]time.Time),
+		stopChan:          make(chan struct{}),
 	}
 }
 
@@ -152,6 +168,9 @@ func (c *CalendarSense) poll() {
 
 	// Check for upcoming meetings that need reminders
 	c.checkUpcomingMeetings(ctx)
+
+	// Check for sprint review clusters that need a pre-brief
+	c.checkSprintBrief(ctx)
 
 	// Clean up old notification records (older than 24 hours)
 	c.cleanupNotifications()
@@ -359,6 +378,96 @@ func (c *CalendarSense) sendMeetingReminder(event calendar.Event, timeUntil time
 	log.Printf("[calendar-sense] Sent meeting reminder: %s (in %s)", event.Summary, formatDuration(timeUntil))
 }
 
+// checkSprintBrief detects sprint review clusters and sends a brief impulse before they start.
+// It looks 8 hours ahead to count all sprint reviews in a day. If 2+ are found and the first
+// starts within sprintBriefBefore, it sends an impulse:sprint_brief to wake the executive.
+func (c *CalendarSense) checkSprintBrief(ctx context.Context) {
+	now := time.Now()
+
+	// Look ahead far enough to find all sprint reviews for the day
+	events, err := c.client.GetUpcomingEvents(ctx, 8*time.Hour, 30)
+	if err != nil {
+		log.Printf("[calendar-sense] Failed to get events for sprint brief check: %v", err)
+		return
+	}
+
+	// Group sprint review events by local date
+	sprintReviewsByDate := make(map[string][]calendar.Event)
+	for _, event := range events {
+		if event.Status == "cancelled" || event.AllDay {
+			continue
+		}
+		if !strings.Contains(strings.ToLower(event.Summary), "sprint review") {
+			continue
+		}
+		localDate := event.Start.In(c.timezone).Format("2006-01-02")
+		sprintReviewsByDate[localDate] = append(sprintReviewsByDate[localDate], event)
+	}
+
+	for date, reviews := range sprintReviewsByDate {
+		if len(reviews) < minSprintReviewsForBrief {
+			continue
+		}
+
+		// Find the earliest review of the day
+		earliest := reviews[0]
+		for _, r := range reviews[1:] {
+			if r.Start.Before(earliest.Start) {
+				earliest = r
+			}
+		}
+
+		timeUntil := time.Until(earliest.Start)
+		if timeUntil > c.sprintBriefBefore || timeUntil < 0 {
+			continue // Outside trigger window
+		}
+
+		// Check if we already sent a brief for this date
+		briefKey := "sprint-brief-" + date
+		c.mu.Lock()
+		_, alreadyNotified := c.notifiedBriefs[briefKey]
+		if alreadyNotified {
+			c.mu.Unlock()
+			continue
+		}
+		c.notifiedBriefs[briefKey] = now
+		c.mu.Unlock()
+		c.Save()
+
+		// Collect event titles for context
+		var titles []string
+		for _, r := range reviews {
+			titles = append(titles, r.Summary)
+		}
+
+		msg := &memory.InboxMessage{
+			ID:        fmt.Sprintf("sprint-brief-%s", date),
+			Type:      "impulse",
+			Subtype:   "sprint_brief",
+			Content:   fmt.Sprintf("Sprint review cluster starting in %s: %d reviews today (%s). Generate sprint brief from GitHub projects.", formatDuration(timeUntil), len(reviews), strings.Join(titles, ", ")),
+			Timestamp: now,
+			Status:    "pending",
+			Priority:  2,
+			Extra: map[string]any{
+				"source":             "calendar",
+				"impulse_type":       "sprint_brief",
+				"intensity":          0.8,
+				"date":               date,
+				"review_count":       len(reviews),
+				"team_names":         titles,
+				"first_event":        earliest.Summary,
+				"first_event_start":  earliest.Start.Format(time.RFC3339),
+				"time_until":         formatDuration(timeUntil),
+			},
+		}
+
+		if c.onMessage != nil {
+			c.onMessage(msg)
+		}
+		log.Printf("[calendar-sense] Sent sprint brief impulse: %d reviews on %s, first in %s", len(reviews), date, formatDuration(timeUntil))
+	}
+}
+
 func (c *CalendarSense) formatDailyAgenda(events []calendar.Event, date time.Time) string {
 	agenda := fmt.Sprintf("Daily agenda for %s:\n\n", date.Format("Monday, January 2"))
 
@@ -389,17 +498,24 @@ func (c *CalendarSense) formatDailyAgenda(events []calendar.Event, date time.Tim
 func (c *CalendarSense) cleanupNotifications() {
 	c.mu.Lock()
 	initialCount := len(c.notifiedEvents)
+	initialBriefs := len(c.notifiedBriefs)
 	cutoff := time.Now().Add(-24 * time.Hour)
 	for key, notifiedAt := range c.notifiedEvents {
 		if notifiedAt.Before(cutoff) {
 			delete(c.notifiedEvents, key)
 		}
 	}
+	for key, notifiedAt := range c.notifiedBriefs {
+		if notifiedAt.Before(cutoff) {
+			delete(c.notifiedBriefs, key)
+		}
+	}
 	cleaned := initialCount - len(c.notifiedEvents)
+	cleanedBriefs := initialBriefs - len(c.notifiedBriefs)
 	c.mu.Unlock()
 
 	// Persist if we actually cleaned anything
-	if cleaned > 0 {
+	if cleaned > 0 || cleanedBriefs > 0 {
 		c.Save()
 	}
 }
@@ -492,10 +608,13 @@ func (c *CalendarSense) Load() error {
 	if state.NotifiedEvents != nil {
 		c.notifiedEvents = state.NotifiedEvents
 	}
+	if state.NotifiedBriefs != nil {
+		c.notifiedBriefs = state.NotifiedBriefs
+	}
 	c.lastDailyAgenda = state.LastDailyAgenda
 
-	log.Printf("[calendar-sense] Loaded state: %d notified events, last agenda %v",
-		len(c.notifiedEvents), c.lastDailyAgenda)
+	log.Printf("[calendar-sense] Loaded state: %d notified events, %d notified briefs, last agenda %v",
+		len(c.notifiedEvents), len(c.notifiedBriefs), c.lastDailyAgenda)
 	return nil
 }
 
@@ -508,6 +627,7 @@ func (c *CalendarSense) Save() error {
 	c.mu.RLock()
 	state := calendarState{
 		NotifiedEvents:  c.notifiedEvents,
+		NotifiedBriefs:  c.notifiedBriefs,
 		LastDailyAgenda: c.lastDailyAgenda,
 	}
 	c.mu.RUnlock()
