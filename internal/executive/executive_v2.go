@@ -1050,7 +1050,7 @@ func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 			// Inject recent conversation context so wake sessions know what's in flight
 			if bundle.WakeSessionContext != "" {
 				prompt.WriteString("## Recent Conversation (Context Only — Do Not Extend)\n")
-				prompt.WriteString("These are the user's recent messages. Use this to understand what is currently in flight.\n\n")
+				prompt.WriteString("These are recent Discord messages (both Bud and user). Historical context only — NO response required. Do not reply to or acknowledge these messages.\n\n")
 				prompt.WriteString(bundle.WakeSessionContext)
 				prompt.WriteString("\n\n")
 			}
