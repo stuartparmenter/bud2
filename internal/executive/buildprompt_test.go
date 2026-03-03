@@ -376,7 +376,7 @@ func TestBuildPrompt_WakeFocus(t *testing.T) {
 	checks := []string{
 		"# Autonomous Wake",
 		"Check tasks and do background work.",
-		"## Recent Conversation (Context Only",
+		"## Conversation Log",
 		"[user] testing once more",
 		"[bud] all good",
 	}
@@ -401,7 +401,7 @@ func TestBuildPrompt_WakeFocusNoInstructions(t *testing.T) {
 	out := exec.buildPrompt(bundle)
 
 	// Without WakeupInstructions, the wake context block should not appear
-	if strings.Contains(out, "Recent Conversation (Context Only") {
+	if strings.Contains(out, "## Conversation Log") {
 		t.Errorf("expected no wake context without WakeupInstructions, got:\n%s", out)
 	}
 }

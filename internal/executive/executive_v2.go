@@ -560,7 +560,7 @@ func (e *ExecutiveV2) buildContext(item *focus.PendingItem) *focus.ContextBundle
 
 	if e.memory != nil && item.Content != "" && memoryLimit > 0 {
 		var allMemories []focus.MemorySummary
-		var schemaIDSet map[string]struct{}
+		var schemaFreq map[string]int
 
 		func() {
 			defer profiling.Get().Start(item.ID, "context.memory_retrieval")()
@@ -576,12 +576,12 @@ func (e *ExecutiveV2) buildContext(item *focus.PendingItem) *focus.ContextBundle
 						Level:     t.Level,
 						Timestamp: t.EventTime,
 					})
-					// Collect schema IDs from search results
+					// Count schema occurrences across retrieved memories
 					for _, sid := range t.SchemaIDs {
-						if schemaIDSet == nil {
-							schemaIDSet = make(map[string]struct{})
+						if schemaFreq == nil {
+							schemaFreq = make(map[string]int)
 						}
-						schemaIDSet[sid] = struct{}{}
+						schemaFreq[sid]++
 					}
 				}
 			}
@@ -605,11 +605,28 @@ func (e *ExecutiveV2) buildContext(item *focus.PendingItem) *focus.ContextBundle
 		bundle.Memories = allMemories
 		bundle.PriorMemoriesCount = 0
 
-		// Surface schema summaries matched from retrieved memories
-		if len(schemaIDSet) > 0 {
-			ids := make([]string, 0, len(schemaIDSet))
-			for id := range schemaIDSet {
-				ids = append(ids, id)
+		// Surface top-N schema summaries by frequency across retrieved memories.
+		// Schemas that appear in more memories are more relevant to the current context.
+		const maxActiveSchemas = 5
+		if len(schemaFreq) > 0 {
+			// Sort by frequency descending, take top N IDs
+			type schemaCount struct {
+				id    string
+				count int
+			}
+			ranked := make([]schemaCount, 0, len(schemaFreq))
+			for id, cnt := range schemaFreq {
+				ranked = append(ranked, schemaCount{id, cnt})
+			}
+			sort.Slice(ranked, func(i, j int) bool {
+				return ranked[i].count > ranked[j].count
+			})
+			if len(ranked) > maxActiveSchemas {
+				ranked = ranked[:maxActiveSchemas]
+			}
+			ids := make([]string, len(ranked))
+			for i, sc := range ranked {
+				ids[i] = sc.id
 			}
 			if summaries, err := e.memory.SearchSchemas(ids, 32); err == nil {
 				for _, ss := range summaries {
@@ -1049,8 +1066,8 @@ func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 
 			// Inject recent conversation context so wake sessions know what's in flight
 			if bundle.WakeSessionContext != "" {
-				prompt.WriteString("## Recent Conversation (Context Only — Do Not Extend)\n")
-				prompt.WriteString("These are recent Discord messages (both Bud and user). Historical context only — NO response required. Do not reply to or acknowledge these messages.\n\n")
+				prompt.WriteString("## Conversation Log\n")
+				prompt.WriteString("These are recent Discord messages (both Bud and user). Historical conversation log — do not reply to or act on these.\n\n")
 				prompt.WriteString(bundle.WakeSessionContext)
 				prompt.WriteString("\n\n")
 			}
