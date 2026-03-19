@@ -289,7 +289,7 @@ func (m *SubagentManager) runSession(ctx context.Context, session *SubagentSessi
 		opts = append(opts, claudecode.WithAllowedTools(tools...))
 	}
 
-	prompt := fmt.Sprintf("## Task\n%s\n\nBegin work on this task. When you are done, call signal_done.", cfg.Task)
+	prompt := fmt.Sprintf("## Task\n%s\n\nBegin work on this task. When you are done, finish your response.", cfg.Task)
 
 	var result strings.Builder
 	err := claudecode.WithClient(ctx, func(client claudecode.Client) error {
@@ -354,7 +354,7 @@ CONSTRAINTS:
 - Do NOT use talk_to_user or discord_react — you cannot communicate directly with the user.
 - If you need information from the user, call AskUserQuestion with your question.
   You will receive the answer inline and can continue your work.
-- When your task is complete, call signal_done with a summary.
+- When your task is complete, finish your response with a clear summary of what you did.
 - Keep reasoning internal. Output decisions and outcomes, not your full thought process.
 `)
 

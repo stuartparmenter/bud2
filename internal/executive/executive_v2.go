@@ -162,11 +162,16 @@ func (e *ExecutiveV2) SubagentCallbacks() (
 	answerFn func(sessionID, answer string) error,
 	statusFn func(sessionID string) (status, result, pendingQuestion string, err error),
 ) {
+	// subagentAllowedTools is the curated tool set for subagents:
+	// standard file tools + search_memory only. No talk_to_user, signal_done, etc.
+	const subagentAllowedTools = "Read,Write,Edit,Glob,Grep,Bash,mcp__bud2__search_memory"
+
 	spawnFn = func(task, systemPromptAppend string) (string, error) {
 		s, err := e.subagents.Spawn(context.Background(), SubagentConfig{
 			Task:               task,
 			SystemPromptAppend: systemPromptAppend,
 			MCPServerURL:       e.config.MCPServerURL,
+			AllowedTools:       subagentAllowedTools,
 		})
 		if err != nil {
 			return "", err
