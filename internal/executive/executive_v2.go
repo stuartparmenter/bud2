@@ -157,23 +157,43 @@ func (e *ExecutiveV2) SetTypingCallbacks(start, stop func(channelID string)) {
 // SubagentCallbacks returns the SubagentManager operation callbacks for injection
 // into the MCP tools Dependencies struct. Call this after NewExecutiveV2.
 func (e *ExecutiveV2) SubagentCallbacks() (
-	spawnFn func(task, systemPromptAppend string) (string, error),
+	spawnFn func(task, systemPromptAppend, profile string) (string, error),
 	listFn func() []map[string]any,
 	answerFn func(sessionID, answer string) error,
 	statusFn func(sessionID string) (status, result, claudeSessionID, pendingQuestion string, err error),
 	stopFn func(sessionID string) error,
 	getLogFn func(sessionID string, lastN int) ([]map[string]any, error),
 ) {
-	// subagentAllowedTools is the curated tool set for subagents:
+	// subagentBaseTools is the default restricted tool set for subagents:
 	// standard file tools + search_memory only. No talk_to_user, signal_done, etc.
-	const subagentAllowedTools = "Read,Write,Edit,Glob,Grep,Bash,mcp__bud2__search_memory"
+	const subagentBaseTools = "Read,Write,Edit,Glob,Grep,Bash,mcp__bud2__search_memory"
 
-	spawnFn = func(task, systemPromptAppend string) (string, error) {
+	spawnFn = func(task, systemPromptAppend, profile string) (string, error) {
+		allowedTools := subagentBaseTools
+		promptAppend := systemPromptAppend
+
+		// Resolve profile: merge tools + load skill content
+		if profile != "" {
+			mergedTools, skillPrompt, err := ResolveSubagentConfig(e.session.statePath, profile, subagentBaseTools)
+			if err != nil {
+				log.Printf("[executive-v2] Warning: failed to load profile %q: %v", profile, err)
+				// Fall through with defaults rather than failing the spawn
+			} else {
+				allowedTools = mergedTools
+				// Combine skill prompt with any caller-provided constraints
+				if skillPrompt != "" && promptAppend != "" {
+					promptAppend = skillPrompt + "\n\n" + promptAppend
+				} else if skillPrompt != "" {
+					promptAppend = skillPrompt
+				}
+			}
+		}
+
 		s, err := e.subagents.Spawn(context.Background(), SubagentConfig{
 			Task:               task,
-			SystemPromptAppend: systemPromptAppend,
+			SystemPromptAppend: promptAppend,
 			MCPServerURL:       e.config.MCPServerURL,
-			AllowedTools:       subagentAllowedTools,
+			AllowedTools:       allowedTools,
 		})
 		if err != nil {
 			return "", err

@@ -1855,6 +1855,7 @@ func registerSubagentTools(server *mcp.Server, deps *Dependencies) {
 		Properties: map[string]mcp.PropDef{
 			"task":        {Type: "string", Description: "Full task description for the subagent. Be specific about what to do and what output you expect."},
 			"constraints": {Type: "string", Description: "Additional constraints or context for the subagent (optional). E.g., 'focus only on X', 'do not modify Y'."},
+			"profile":     {Type: "string", Description: "Optional skill profile to load (e.g. 'researcher', 'coder', 'reviewer'). Expands tool access and injects behavioral guidance from state/system/profiles/. Omit to use the default restricted tool set."},
 		},
 		Required: []string{"task"},
 	}, func(ctx any, args map[string]any) (string, error) {
@@ -1863,14 +1864,19 @@ func registerSubagentTools(server *mcp.Server, deps *Dependencies) {
 			return "", fmt.Errorf("task is required")
 		}
 		constraints, _ := args["constraints"].(string)
+		profile, _ := args["profile"].(string)
 
-		sessionID, err := deps.SpawnSubagent(task, constraints)
+		sessionID, err := deps.SpawnSubagent(task, constraints, profile)
 		if err != nil {
 			return "", fmt.Errorf("failed to spawn subagent: %w", err)
 		}
 
-		log.Printf("Spawned subagent %s: %s", sessionID, truncate(task, 60))
-		return fmt.Sprintf("Subagent started. Session ID: %s\n\nThe subagent is now running autonomously. Use list_subagents to check progress or get_subagent_status for details.", sessionID), nil
+		msg := fmt.Sprintf("Subagent started. Session ID: %s\n\nThe subagent is now running autonomously. Use list_subagents to check progress or get_subagent_status for details.", sessionID)
+		if profile != "" {
+			msg = fmt.Sprintf("Subagent started with profile %q. Session ID: %s\n\nThe subagent is now running autonomously. Use list_subagents to check progress or get_subagent_status for details.", profile, sessionID)
+		}
+		log.Printf("Spawned subagent %s (profile=%q): %s", sessionID, profile, truncate(task, 60))
+		return msg, nil
 	})
 
 	// list_subagents — show all active subagent sessions

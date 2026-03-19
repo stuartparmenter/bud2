@@ -380,12 +380,12 @@ func main() {
 				exec.GetMCPToolCallback()(toolName)
 			}
 		},
-		SpawnSubagent: func(task, systemPromptAppend string) (string, error) {
+		SpawnSubagent: func(task, systemPromptAppend, profile string) (string, error) {
 			if exec == nil {
 				return "", fmt.Errorf("executive not yet initialized")
 			}
 			spawnFn, _, _, _, _, _ := exec.SubagentCallbacks()
-			return spawnFn(task, systemPromptAppend)
+			return spawnFn(task, systemPromptAppend, profile)
 		},
 		ListSubagents: func() []map[string]any {
 			if exec == nil {

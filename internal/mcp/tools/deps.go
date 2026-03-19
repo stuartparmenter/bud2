@@ -48,7 +48,8 @@ type Dependencies struct {
 
 	// Subagent management callbacks (optional — injected by executive)
 	// SpawnSubagent starts a new subagent session and returns its ID.
-	SpawnSubagent func(task, systemPromptAppend string) (string, error)
+	// profile is optional — if non-empty, loads the named profile from state/system/profiles/.
+	SpawnSubagent func(task, systemPromptAppend, profile string) (string, error)
 	// ListSubagents returns a snapshot of active subagent sessions.
 	ListSubagents func() []map[string]any
 	// AnswerSubagent routes an answer to a waiting subagent.
