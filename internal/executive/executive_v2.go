@@ -161,6 +161,7 @@ func (e *ExecutiveV2) SubagentCallbacks() (
 	listFn func() []map[string]any,
 	answerFn func(sessionID, answer string) error,
 	statusFn func(sessionID string) (status, result, claudeSessionID, pendingQuestion string, err error),
+	stopFn func(sessionID string) error,
 ) {
 	// subagentAllowedTools is the curated tool set for subagents:
 	// standard file tools + search_memory only. No talk_to_user, signal_done, etc.
@@ -211,6 +212,10 @@ func (e *ExecutiveV2) SubagentCallbacks() (
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		return s.status.String(), s.result, s.ID, s.pendingQuestion, s.lastErr
+	}
+
+	stopFn = func(sessionID string) error {
+		return e.subagents.Stop(sessionID)
 	}
 
 	return

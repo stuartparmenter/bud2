@@ -55,4 +55,6 @@ type Dependencies struct {
 	AnswerSubagent func(sessionID, answer string) error
 	// GetSubagentStatus returns (status, result, claudeSessionID, pendingQuestion, error) for a session.
 	GetSubagentStatus func(sessionID string) (status, result, claudeSessionID, pendingQuestion string, err error)
+	// StopSubagent cancels a running subagent session.
+	StopSubagent func(sessionID string) error
 }

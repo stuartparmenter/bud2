@@ -1922,6 +1922,27 @@ func registerSubagentTools(server *mcp.Server, deps *Dependencies) {
 		return string(data), nil
 	})
 
+	// stop_subagent — cancel a running subagent session
+	if deps.StopSubagent != nil {
+		server.RegisterTool("stop_subagent", mcp.ToolDef{
+			Description: "Stop a running subagent session by cancelling its context. Use this if a subagent is not doing what you want or needs to be terminated.",
+			Properties: map[string]mcp.PropDef{
+				"session_id": {Type: "string", Description: "The subagent session ID to stop"},
+			},
+			Required: []string{"session_id"},
+		}, func(ctx any, args map[string]any) (string, error) {
+			sessionID, ok := args["session_id"].(string)
+			if !ok || sessionID == "" {
+				return "", fmt.Errorf("session_id is required")
+			}
+			if err := deps.StopSubagent(sessionID); err != nil {
+				return "", err
+			}
+			log.Printf("Stopped subagent %s", sessionID)
+			return fmt.Sprintf("Subagent %s has been stopped.", sessionID), nil
+		})
+	}
+
 	// answer_subagent — route an answer to a waiting subagent
 	if deps.AnswerSubagent != nil {
 		server.RegisterTool("answer_subagent", mcp.ToolDef{

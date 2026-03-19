@@ -73,6 +73,9 @@ type SubagentSession struct {
 	// claudeIDReady receives the Claude session ID from the first StreamEvent.
 	// Buffered(1); Spawn() blocks on it (with timeout) to re-key the session.
 	claudeIDReady chan string
+
+	// cancel cancels the session's task context, terminating the Claude subprocess.
+	cancel context.CancelFunc
 }
 
 // Status returns the current lifecycle status.
@@ -155,6 +158,8 @@ type SubagentConfig struct {
 func (m *SubagentManager) Spawn(ctx context.Context, cfg SubagentConfig) (*SubagentSession, error) {
 	tempID := generateSessionUUID()
 
+	taskCtx, taskCancel := context.WithTimeout(ctx, 3*time.Minute)
+
 	session := &SubagentSession{
 		ID:            tempID,
 		Task:          cfg.Task,
@@ -162,13 +167,13 @@ func (m *SubagentManager) Spawn(ctx context.Context, cfg SubagentConfig) (*Subag
 		status:        SubagentRunning,
 		answerReady:   make(chan string, 1),
 		claudeIDReady: make(chan string, 1),
+		cancel:        taskCancel,
 	}
 
 	m.mu.Lock()
 	m.sessions[tempID] = session
 	m.mu.Unlock()
 
-	taskCtx, taskCancel := context.WithTimeout(ctx, 3*time.Minute)
 	go func() {
 		defer taskCancel()
 		m.runSession(taskCtx, session, cfg)
@@ -237,6 +242,26 @@ func (m *SubagentManager) Get(id string) *SubagentSession {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.sessions[id]
+}
+
+// Stop cancels a running subagent session by its ID. Returns an error if the
+// session is not found or is already finished.
+func (m *SubagentManager) Stop(sessionID string) error {
+	m.mu.RLock()
+	session, ok := m.sessions[sessionID]
+	m.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("subagent session not found: %s", sessionID)
+	}
+	session.mu.Lock()
+	done := session.status == SubagentCompleted || session.status == SubagentFailed
+	session.mu.Unlock()
+	if done {
+		return fmt.Errorf("subagent %s is already finished (status: %s)", sessionID, session.status)
+	}
+	log.Printf("[subagent-manager] Stopping session %s on request", sessionID)
+	session.cancel()
+	return nil
 }
 
 // Cleanup removes completed/failed sessions older than the given duration.
