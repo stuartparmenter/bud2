@@ -565,6 +565,9 @@ func (e *ExecutiveV2) processItem(ctx context.Context, item *focus.PendingItem) 
 		}
 	} else {
 		log.Printf("✅ Session complete in %.1fs (no usage data)", duration)
+		if id := e.session.ClaudeSessionID(); id != "" {
+			log.Printf("   Resume: claude --resume %s", id)
+		}
 	}
 
 	// Mark memories as seen so they're not re-injected on resume turns
@@ -1258,15 +1261,16 @@ func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 // is for side-effects like session tracking, not for tool execution.
 // MCP tool names are prefixed: mcp__bud2__talk_to_user, mcp__bud2__signal_done, etc.
 func (e *ExecutiveV2) handleToolCall(item *focus.PendingItem, name string, args map[string]any) (string, error) {
-	log.Printf("[executive-v2] Tool call for item %s: %s", item.ID, name)
+	isTalkToUser := strings.HasSuffix(name, "talk_to_user") || strings.HasSuffix(name, "send_message") || strings.HasSuffix(name, "respond_to_user")
+	isNoise := isTalkToUser || name == "ToolSearch"
+	if !isNoise {
+		log.Printf("[executive-v2] tool: %s", name)
+	}
 
 	// Match both bare names (legacy) and MCP-prefixed names
 	switch {
-	case strings.HasSuffix(name, "talk_to_user") || strings.HasSuffix(name, "send_message") || strings.HasSuffix(name, "respond_to_user"):
-		// Just log — bud-mcp handles actual Discord sending
-		if msg, ok := args["message"].(string); ok {
-			log.Printf("[executive-v2] talk_to_user: %s", truncate(msg, 100))
-		}
+	case isTalkToUser:
+		// Sending is logged by main.go when dispatched — no duplicate needed
 		return "observed", nil
 
 	case strings.HasSuffix(name, "signal_done"):
@@ -1285,7 +1289,7 @@ func (e *ExecutiveV2) toolComplete(item *focus.PendingItem, args map[string]any)
 		summary = s
 	}
 
-	log.Printf("[executive-v2] Item %s marked complete: %s", item.ID, summary)
+	log.Printf("[executive-v2] signal_done: %s", summary)
 
 	// Complete session tracking
 	if e.config.SessionTracker != nil {
