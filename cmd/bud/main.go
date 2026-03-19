@@ -384,36 +384,43 @@ func main() {
 			if exec == nil {
 				return "", fmt.Errorf("executive not yet initialized")
 			}
-			spawnFn, _, _, _, _ := exec.SubagentCallbacks()
+			spawnFn, _, _, _, _, _ := exec.SubagentCallbacks()
 			return spawnFn(task, systemPromptAppend)
 		},
 		ListSubagents: func() []map[string]any {
 			if exec == nil {
 				return nil
 			}
-			_, listFn, _, _, _ := exec.SubagentCallbacks()
+			_, listFn, _, _, _, _ := exec.SubagentCallbacks()
 			return listFn()
 		},
 		AnswerSubagent: func(sessionID, answer string) error {
 			if exec == nil {
 				return fmt.Errorf("executive not yet initialized")
 			}
-			_, _, answerFn, _, _ := exec.SubagentCallbacks()
+			_, _, answerFn, _, _, _ := exec.SubagentCallbacks()
 			return answerFn(sessionID, answer)
 		},
 		GetSubagentStatus: func(sessionID string) (string, string, string, string, error) {
 			if exec == nil {
 				return "", "", "", "", fmt.Errorf("executive not yet initialized")
 			}
-			_, _, _, statusFn, _ := exec.SubagentCallbacks()
+			_, _, _, statusFn, _, _ := exec.SubagentCallbacks()
 			return statusFn(sessionID)
 		},
 		StopSubagent: func(sessionID string) error {
 			if exec == nil {
 				return fmt.Errorf("executive not yet initialized")
 			}
-			_, _, _, _, stopFn := exec.SubagentCallbacks()
+			_, _, _, _, stopFn, _ := exec.SubagentCallbacks()
 			return stopFn(sessionID)
+		},
+		GetSubagentLog: func(sessionID string, lastN int) ([]map[string]any, error) {
+			if exec == nil {
+				return nil, fmt.Errorf("executive not yet initialized")
+			}
+			_, _, _, _, _, getLogFn := exec.SubagentCallbacks()
+			return getLogFn(sessionID, lastN)
 		},
 	}
 

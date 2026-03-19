@@ -57,4 +57,7 @@ type Dependencies struct {
 	GetSubagentStatus func(sessionID string) (status, result, claudeSessionID, pendingQuestion string, err error)
 	// StopSubagent cancels a running subagent session.
 	StopSubagent func(sessionID string) error
+	// GetSubagentLog returns the last N activity events for a session.
+	// Events include tool calls and text snippets with timestamps.
+	GetSubagentLog func(sessionID string, lastN int) ([]map[string]any, error)
 }

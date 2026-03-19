@@ -162,6 +162,7 @@ func (e *ExecutiveV2) SubagentCallbacks() (
 	answerFn func(sessionID, answer string) error,
 	statusFn func(sessionID string) (status, result, claudeSessionID, pendingQuestion string, err error),
 	stopFn func(sessionID string) error,
+	getLogFn func(sessionID string, lastN int) ([]map[string]any, error),
 ) {
 	// subagentAllowedTools is the curated tool set for subagents:
 	// standard file tools + search_memory only. No talk_to_user, signal_done, etc.
@@ -216,6 +217,27 @@ func (e *ExecutiveV2) SubagentCallbacks() (
 
 	stopFn = func(sessionID string) error {
 		return e.subagents.Stop(sessionID)
+	}
+
+	getLogFn = func(sessionID string, lastN int) ([]map[string]any, error) {
+		s := e.subagents.Get(sessionID)
+		if s == nil {
+			return nil, fmt.Errorf("subagent session not found: %s", sessionID)
+		}
+		events := s.Events(lastN)
+		result := make([]map[string]any, 0, len(events))
+		for _, ev := range events {
+			entry := map[string]any{
+				"kind":    string(ev.Kind),
+				"at":      ev.At.Format("15:04:05"),
+				"summary": ev.Summary,
+			}
+			if ev.ToolName != "" {
+				entry["tool"] = ev.ToolName
+			}
+			result = append(result, entry)
+		}
+		return result, nil
 	}
 
 	return

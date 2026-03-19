@@ -22,6 +22,25 @@ import (
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
 
+// SubagentEventKind categorizes a logged subagent event.
+type SubagentEventKind string
+
+const (
+	SubagentEventToolCall SubagentEventKind = "tool_call"
+	SubagentEventText     SubagentEventKind = "text"
+	SubagentEventError    SubagentEventKind = "error"
+)
+
+// SubagentEvent records a discrete activity from a subagent session.
+type SubagentEvent struct {
+	Kind     SubagentEventKind `json:"kind"`
+	At       time.Time         `json:"at"`
+	ToolName string            `json:"tool,omitempty"` // for tool_call
+	Summary  string            `json:"summary"`
+}
+
+const maxSubagentEvents = 50
+
 // SubagentStatus describes the current lifecycle state of a subagent session.
 type SubagentStatus int
 
@@ -83,6 +102,42 @@ type SubagentSession struct {
 	// stopped is set true by Stop() before cancelling, so runSession can
 	// distinguish an explicit stop from an unexpected context cancellation.
 	stopped bool
+
+	// events is a capped log of recent subagent activity (tool calls, text).
+	events      []SubagentEvent
+	lastEventAt time.Time
+}
+
+// appendEvent records an event in the session's activity log (capped at maxSubagentEvents).
+func (s *SubagentSession) appendEvent(e SubagentEvent) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastEventAt = e.At
+	s.events = append(s.events, e)
+	if len(s.events) > maxSubagentEvents {
+		s.events = s.events[len(s.events)-maxSubagentEvents:]
+	}
+}
+
+// Events returns the last n events. If n <= 0 or n >= total, returns all events.
+func (s *SubagentSession) Events(n int) []SubagentEvent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if n <= 0 || n >= len(s.events) {
+		out := make([]SubagentEvent, len(s.events))
+		copy(out, s.events)
+		return out
+	}
+	out := make([]SubagentEvent, n)
+	copy(out, s.events[len(s.events)-n:])
+	return out
+}
+
+// LastEventAt returns the timestamp of the most recent recorded event.
+func (s *SubagentSession) LastEventAt() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastEventAt
 }
 
 // Status returns the current lifecycle status.
@@ -404,8 +459,19 @@ func (m *SubagentManager) runSession(ctx context.Context, session *SubagentSessi
 					case *claudecode.TextBlock:
 						result.WriteString(block.Text)
 						log.Printf("[subagent-%s] text output (%d chars)", session.ID[:8], len(block.Text))
+						session.appendEvent(SubagentEvent{
+							Kind:    SubagentEventText,
+							At:      time.Now(),
+							Summary: truncate(block.Text, 120),
+						})
 					case *claudecode.ToolUseBlock:
 						log.Printf("[subagent-%s] calling tool: %s", session.ID[:8], block.Name)
+						session.appendEvent(SubagentEvent{
+							Kind:     SubagentEventToolCall,
+							At:       time.Now(),
+							ToolName: block.Name,
+							Summary:  summarizeToolInput(block.Name, block.Input),
+						})
 					}
 				}
 			case *claudecode.ResultMessage:
@@ -456,6 +522,31 @@ func extractAskUserQuestionText(input map[string]any) string {
 	}
 	q, _ := first["question"].(string)
 	return q
+}
+
+// summarizeToolInput returns a short human-readable summary of a tool call's input.
+// It extracts the most relevant field for common tools, falling back to the first
+// string-valued field for unknown tools.
+func summarizeToolInput(toolName string, input map[string]interface{}) string {
+	keyByTool := map[string]string{
+		"Read":  "file_path",
+		"Write": "file_path",
+		"Edit":  "file_path",
+		"Bash":  "command",
+		"Glob":  "pattern",
+		"Grep":  "pattern",
+	}
+	if key, ok := keyByTool[toolName]; ok {
+		if v, ok := input[key].(string); ok && v != "" {
+			return truncate(v, 80)
+		}
+	}
+	for _, v := range input {
+		if s, ok := v.(string); ok && s != "" {
+			return truncate(s, 80)
+		}
+	}
+	return ""
 }
 
 // buildSubagentSystemPrompt constructs the system prompt for a subagent session.

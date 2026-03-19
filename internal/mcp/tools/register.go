@@ -1888,7 +1888,7 @@ func registerSubagentTools(server *mcp.Server, deps *Dependencies) {
 
 	// get_subagent_status — get detailed status for a session
 	server.RegisterTool("get_subagent_status", mcp.ToolDef{
-		Description: "Get the current status, result, or pending question for a specific subagent session.",
+		Description: "Get the current status, result, pending question, and recent activity for a specific subagent session. Includes the last 5 tool calls/text events and a 'stuck' flag if the subagent has been silent for >2 minutes while running.",
 		Properties: map[string]mcp.PropDef{
 			"session_id": {Type: "string", Description: "The subagent session ID returned by spawn_subagent"},
 		},
@@ -1918,9 +1918,56 @@ func registerSubagentTools(server *mcp.Server, deps *Dependencies) {
 		if pendingQuestion != "" {
 			out["pending_question"] = pendingQuestion
 		}
+		// Include recent activity and stuck detection if available.
+		if deps.GetSubagentLog != nil {
+			events, logErr := deps.GetSubagentLog(sessionID, 5)
+			if logErr == nil && len(events) > 0 {
+				out["recent_activity"] = events
+				// Stuck: running/waiting and last event was >2 minutes ago.
+				lastAt, timeOK := events[len(events)-1]["at"].(string)
+				if timeOK && (status == "running" || status == "waiting_for_input") {
+					if t, parseErr := time.Parse("15:04:05", lastAt); parseErr == nil {
+						// Reconstruct full time using today's date for comparison.
+						now := time.Now()
+						full := time.Date(now.Year(), now.Month(), now.Day(),
+							t.Hour(), t.Minute(), t.Second(), 0, now.Location())
+						if now.Sub(full) > 2*time.Minute {
+							out["stuck"] = true
+						}
+					}
+				}
+			}
+		}
 		data, _ := json.MarshalIndent(out, "", "  ")
 		return string(data), nil
 	})
+
+	// get_subagent_log — retrieve full activity log for a session
+	if deps.GetSubagentLog != nil {
+		server.RegisterTool("get_subagent_log", mcp.ToolDef{
+			Description: "Get the activity log for a subagent session: tool calls (name + input summary) and text snippets, in chronological order. Use this to inspect what a subagent has been doing, diagnose stuck sessions, or verify progress.",
+			Properties: map[string]mcp.PropDef{
+				"session_id": {Type: "string", Description: "The subagent session ID returned by spawn_subagent"},
+				"last_n":     {Type: "number", Description: "Number of most recent events to return (default: 20, max: 50)"},
+			},
+			Required: []string{"session_id"},
+		}, func(ctx any, args map[string]any) (string, error) {
+			sessionID, ok := args["session_id"].(string)
+			if !ok || sessionID == "" {
+				return "", fmt.Errorf("session_id is required")
+			}
+			lastN := 20
+			if n, ok := args["last_n"].(float64); ok && n > 0 {
+				lastN = int(n)
+			}
+			events, err := deps.GetSubagentLog(sessionID, lastN)
+			if err != nil {
+				return "", err
+			}
+			data, _ := json.MarshalIndent(events, "", "  ")
+			return string(data), nil
+		})
+	}
 
 	// stop_subagent — cancel a running subagent session
 	if deps.StopSubagent != nil {
