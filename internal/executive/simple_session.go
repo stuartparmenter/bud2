@@ -315,6 +315,7 @@ func (s *SimpleSession) SendPrompt(ctx context.Context, prompt string, cfg Claud
 
 	opts := []claudecode.Option{
 		claudecode.WithPermissionMode(claudecode.PermissionModeBypassPermissions),
+		claudecode.WithPartialStreaming(), // captures SessionID from first StreamEvent
 	}
 
 	// Resume existing Claude session when available, otherwise let the SDK
@@ -350,6 +351,14 @@ func (s *SimpleSession) SendPrompt(ctx context.Context, prompt string, cfg Claud
 	receiveLoop:
 		for msg := range client.ReceiveMessages(timeoutCtx) {
 			switch m := msg.(type) {
+			case *claudecode.StreamEvent:
+				// Capture session ID from the first streaming event — this arrives
+				// within milliseconds and ensures claudeSessionID is set before
+				// signal_done can cancel the context (which skips ResultMessage).
+				if m.SessionID != "" && s.claudeSessionID == "" {
+					s.claudeSessionID = m.SessionID
+					logging.Debug("simple-session", "Captured Claude session ID early: %s", m.SessionID)
+				}
 			case *claudecode.AssistantMessage:
 				for _, block := range m.Content {
 					switch b := block.(type) {
