@@ -30,6 +30,7 @@ const (
 	SubagentWaitingForInput                       // Blocked on AskUserQuestion; waiting for executive answer
 	SubagentCompleted                             // Finished successfully
 	SubagentFailed                                // Exited with error
+	SubagentStopped                               // Cancelled via stop_subagent
 )
 
 func (s SubagentStatus) String() string {
@@ -42,6 +43,8 @@ func (s SubagentStatus) String() string {
 		return "completed"
 	case SubagentFailed:
 		return "failed"
+	case SubagentStopped:
+		return "stopped"
 	default:
 		return "unknown"
 	}
@@ -76,6 +79,10 @@ type SubagentSession struct {
 
 	// cancel cancels the session's task context, terminating the Claude subprocess.
 	cancel context.CancelFunc
+
+	// stopped is set true by Stop() before cancelling, so runSession can
+	// distinguish an explicit stop from an unexpected context cancellation.
+	stopped bool
 }
 
 // Status returns the current lifecycle status.
@@ -119,12 +126,26 @@ type SubagentManager struct {
 	DoneNotify chan *SubagentSession
 }
 
-// NewSubagentManager creates a new manager.
+// NewSubagentManager creates a new manager and starts a background goroutine
+// that removes completed/failed/stopped sessions older than 1 hour every 10 minutes.
 func NewSubagentManager(stateDir string) *SubagentManager {
-	return &SubagentManager{
+	m := &SubagentManager{
 		sessions:       make(map[string]*SubagentSession),
 		QuestionNotify: make(chan *SubagentSession, 16),
 		DoneNotify:     make(chan *SubagentSession, 16),
+	}
+	go m.cleanupLoop()
+	return m
+}
+
+// cleanupLoop periodically removes finished sessions older than 1 hour.
+func (m *SubagentManager) cleanupLoop() {
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		if n := m.Cleanup(time.Hour); n > 0 {
+			log.Printf("[subagent-manager] Cleaned up %d finished session(s)", n)
+		}
 	}
 }
 
@@ -254,12 +275,15 @@ func (m *SubagentManager) Stop(sessionID string) error {
 		return fmt.Errorf("subagent session not found: %s", sessionID)
 	}
 	session.mu.Lock()
-	done := session.status == SubagentCompleted || session.status == SubagentFailed
+	done := session.status == SubagentCompleted || session.status == SubagentFailed || session.status == SubagentStopped
 	session.mu.Unlock()
 	if done {
 		return fmt.Errorf("subagent %s is already finished (status: %s)", sessionID, session.status)
 	}
 	log.Printf("[subagent-manager] Stopping session %s on request", sessionID)
+	session.mu.Lock()
+	session.stopped = true
+	session.mu.Unlock()
 	session.cancel()
 	return nil
 }
@@ -272,7 +296,7 @@ func (m *SubagentManager) Cleanup(olderThan time.Duration) int {
 	var removed int
 	for id, s := range m.sessions {
 		s.mu.Lock()
-		done := s.status == SubagentCompleted || s.status == SubagentFailed
+		done := s.status == SubagentCompleted || s.status == SubagentFailed || s.status == SubagentStopped
 		old := s.SpawnedAt.Before(cutoff)
 		s.mu.Unlock()
 		if done && old {
@@ -396,7 +420,10 @@ func (m *SubagentManager) runSession(ctx context.Context, session *SubagentSessi
 
 	session.mu.Lock()
 	session.result = result.String()
-	if err != nil {
+	if session.stopped {
+		session.status = SubagentStopped
+		log.Printf("[subagent] Session %s stopped", session.ID)
+	} else if err != nil {
 		session.status = SubagentFailed
 		session.lastErr = err
 		log.Printf("[subagent] Session %s failed: %v", session.ID, err)
