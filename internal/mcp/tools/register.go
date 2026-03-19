@@ -43,6 +43,9 @@ func RegisterAll(server *mcp.Server, deps *Dependencies) {
 	if deps.MemoryJudge != nil {
 		registerEvalTools(server, deps)
 	}
+	if deps.SpawnSubagent != nil {
+		registerSubagentTools(server, deps)
+	}
 }
 
 func registerCommunicationTools(server *mcp.Server, deps *Dependencies) {
@@ -1843,6 +1846,104 @@ func registerGitHubTools(server *mcp.Server, deps *Dependencies) {
 		data, _ := json.MarshalIndent(items, "", "  ")
 		return string(data), nil
 	})
+}
+
+func registerSubagentTools(server *mcp.Server, deps *Dependencies) {
+	// spawn_subagent — start a new subagent session
+	server.RegisterTool("spawn_subagent", mcp.ToolDef{
+		Description: "Spawn a new subagent session to work autonomously on a task. The subagent runs with a restricted tool set (no talk_to_user, no AskUserQuestion) and reports back via signal_done. Use this to delegate research, analysis, or implementation tasks that can run in the background. Returns a session_id for tracking.",
+		Properties: map[string]mcp.PropDef{
+			"task":        {Type: "string", Description: "Full task description for the subagent. Be specific about what to do and what output you expect."},
+			"constraints": {Type: "string", Description: "Additional constraints or context for the subagent (optional). E.g., 'focus only on X', 'do not modify Y'."},
+		},
+		Required: []string{"task"},
+	}, func(ctx any, args map[string]any) (string, error) {
+		task, ok := args["task"].(string)
+		if !ok || task == "" {
+			return "", fmt.Errorf("task is required")
+		}
+		constraints, _ := args["constraints"].(string)
+
+		sessionID, err := deps.SpawnSubagent(task, constraints)
+		if err != nil {
+			return "", fmt.Errorf("failed to spawn subagent: %w", err)
+		}
+
+		log.Printf("Spawned subagent %s: %s", sessionID, truncate(task, 60))
+		return fmt.Sprintf("Subagent started. Session ID: %s\n\nThe subagent is now running autonomously. Use list_subagents to check progress or get_subagent_status for details.", sessionID), nil
+	})
+
+	// list_subagents — show all active subagent sessions
+	server.RegisterTool("list_subagents", mcp.ToolDef{
+		Description: "List all active subagent sessions with their current status. Use this to check progress on delegated tasks.",
+		Properties:  map[string]mcp.PropDef{},
+	}, func(ctx any, args map[string]any) (string, error) {
+		if deps.ListSubagents == nil {
+			return "[]", nil
+		}
+		sessions := deps.ListSubagents()
+		data, _ := json.MarshalIndent(sessions, "", "  ")
+		return string(data), nil
+	})
+
+	// get_subagent_status — get detailed status for a session
+	server.RegisterTool("get_subagent_status", mcp.ToolDef{
+		Description: "Get the current status, result, or pending question for a specific subagent session.",
+		Properties: map[string]mcp.PropDef{
+			"session_id": {Type: "string", Description: "The subagent session ID returned by spawn_subagent"},
+		},
+		Required: []string{"session_id"},
+	}, func(ctx any, args map[string]any) (string, error) {
+		sessionID, ok := args["session_id"].(string)
+		if !ok || sessionID == "" {
+			return "", fmt.Errorf("session_id is required")
+		}
+		if deps.GetSubagentStatus == nil {
+			return "", fmt.Errorf("subagent status not available")
+		}
+		status, result, pendingQuestion, err := deps.GetSubagentStatus(sessionID)
+		if err != nil {
+			return "", err
+		}
+		out := map[string]any{
+			"session_id": sessionID,
+			"status":     status,
+		}
+		if result != "" {
+			out["result"] = result
+		}
+		if pendingQuestion != "" {
+			out["pending_question"] = pendingQuestion
+		}
+		data, _ := json.MarshalIndent(out, "", "  ")
+		return string(data), nil
+	})
+
+	// answer_subagent — route an answer to a waiting subagent
+	if deps.AnswerSubagent != nil {
+		server.RegisterTool("answer_subagent", mcp.ToolDef{
+			Description: "Provide an answer to a subagent that is waiting for input. Use this after receiving a pending_question from get_subagent_status or list_subagents.",
+			Properties: map[string]mcp.PropDef{
+				"session_id": {Type: "string", Description: "The subagent session ID"},
+				"answer":     {Type: "string", Description: "The answer to provide to the subagent"},
+			},
+			Required: []string{"session_id", "answer"},
+		}, func(ctx any, args map[string]any) (string, error) {
+			sessionID, ok := args["session_id"].(string)
+			if !ok || sessionID == "" {
+				return "", fmt.Errorf("session_id is required")
+			}
+			answer, ok := args["answer"].(string)
+			if !ok || answer == "" {
+				return "", fmt.Errorf("answer is required")
+			}
+			if err := deps.AnswerSubagent(sessionID, answer); err != nil {
+				return "", err
+			}
+			log.Printf("Answer provided to subagent %s", sessionID)
+			return fmt.Sprintf("Answer delivered to subagent %s. It will resume processing.", sessionID), nil
+		})
+	}
 }
 
 func registerEvalTools(server *mcp.Server, deps *Dependencies) {

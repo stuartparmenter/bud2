@@ -380,6 +380,34 @@ func main() {
 				exec.GetMCPToolCallback()(toolName)
 			}
 		},
+		SpawnSubagent: func(task, systemPromptAppend string) (string, error) {
+			if exec == nil {
+				return "", fmt.Errorf("executive not yet initialized")
+			}
+			spawnFn, _, _, _ := exec.SubagentCallbacks()
+			return spawnFn(task, systemPromptAppend)
+		},
+		ListSubagents: func() []map[string]any {
+			if exec == nil {
+				return nil
+			}
+			_, listFn, _, _ := exec.SubagentCallbacks()
+			return listFn()
+		},
+		AnswerSubagent: func(sessionID, answer string) error {
+			if exec == nil {
+				return fmt.Errorf("executive not yet initialized")
+			}
+			_, _, answerFn, _ := exec.SubagentCallbacks()
+			return answerFn(sessionID, answer)
+		},
+		GetSubagentStatus: func(sessionID string) (string, string, string, error) {
+			if exec == nil {
+				return "", "", "", fmt.Errorf("executive not yet initialized")
+			}
+			_, _, _, statusFn := exec.SubagentCallbacks()
+			return statusFn(sessionID)
+		},
 	}
 
 	// Register all MCP tools

@@ -59,6 +59,10 @@ type SimpleSession struct {
 	// Track if we've received text output for current prompt (to avoid duplicates)
 	currentPromptHasText bool
 
+	// isResuming is set by PrepareForResume to tell buildPrompt to skip static context
+	// (core identity, conversation buffer) that's already in the Claude session history.
+	isResuming bool
+
 	// Callbacks
 	onToolCall func(name string, args map[string]any) (string, error)
 	onOutput   func(text string)
@@ -251,6 +255,34 @@ func (s *SimpleSession) PrepareNewSession() {
 	s.sessionStartTime = time.Now()
 	s.memoryIDMap = make(map[string]string)
 	s.claudeSessionID = ""
+	s.isResuming = false
+}
+
+// PrepareForResume prepares for a new turn in an ongoing Claude session.
+// Unlike PrepareNewSession, it preserves claudeSessionID (for --resume),
+// seenMemoryIDs (to avoid re-injecting seen memories), and lastBufferSync
+// (to only send new episodes). It clears memoryIDMap so memory self-eval
+// display IDs are fresh for this turn, and sets isResuming so buildPrompt
+// skips static context already present in the session history.
+//
+// Call this instead of PrepareNewSession when ClaudeSessionID() is non-empty
+// and ShouldReset() is false.
+func (s *SimpleSession) PrepareForResume() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessionID = generateSessionUUID() // Fresh tracking ID per turn
+	s.sessionStartTime = time.Now()
+	s.memoryIDMap = make(map[string]string) // Fresh display IDs for memory eval
+	// claudeSessionID preserved — used for --resume flag
+	// seenMemoryIDs preserved — avoids re-injecting already-sent memories
+	// lastBufferSync preserved — only sends new conversation episodes
+	s.isResuming = true
+}
+
+// IsResuming returns true if this turn is resuming an existing Claude session.
+// Used by buildPrompt to skip static context already in the session history.
+func (s *SimpleSession) IsResuming() bool {
+	return s.isResuming
 }
 
 // OnToolCall sets the callback for tool calls
@@ -291,12 +323,17 @@ func (s *SimpleSession) SendPrompt(ctx context.Context, prompt string, cfg Claud
 		"--verbose",
 	}
 
-	// One-shot sessions: session ID must already be rotated by the caller via
-	// PrepareNewSession before StartSession is recorded in the tracker.
-	// Pass --session-id so the CLI uses our UUID as the session file name,
-	// unifying bud's tracking ID with the --resume ID. (CLI bug: currently
-	// ignored in --print mode despite being documented; re-check on upgrades.)
-	args = append(args, "--session-id", s.sessionID)
+	// Use --resume when a Claude session ID from a prior turn is available.
+	// This reloads the full session history, eliminating the need to re-inject
+	// conversation buffer and core identity in the prompt.
+	// Otherwise, pass --session-id so the CLI uses our UUID as the session
+	// file name, unifying bud's tracking ID with the --resume ID.
+	if s.claudeSessionID != "" && s.isResuming {
+		log.Printf("[simple-session] Resuming Claude session %s (bud turn %s)", s.claudeSessionID, s.sessionID)
+		args = append(args, "--resume", s.claudeSessionID)
+	} else {
+		args = append(args, "--session-id", s.sessionID)
+	}
 
 	if cfg.Model != "" {
 		args = append(args, "--model", cfg.Model)
@@ -585,7 +622,9 @@ func (s *SimpleSession) Reset() {
 	s.lastBufferSync = time.Time{} // Reset buffer sync so full buffer is sent on first prompt
 	s.userMessageCount = 0         // Reset message counter
 	s.lastUsage = nil              // Clear usage data
-	s.clearResetPending()          // Clear the pending flag so new sessions can start
+	s.claudeSessionID = ""         // Force new session (no resume)
+	s.isResuming = false
+	s.clearResetPending() // Clear the pending flag so new sessions can start
 	log.Printf("[simple-session] Session reset complete, new session ID: %s", s.sessionID)
 }
 

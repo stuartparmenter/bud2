@@ -45,4 +45,14 @@ type Dependencies struct {
 	// If set, MCP tools will call this to notify that they've been executed
 	// Used to detect user responses (talk_to_user, discord_react) for validation
 	OnMCPToolCall func(toolName string)
+
+	// Subagent management callbacks (optional — injected by executive)
+	// SpawnSubagent starts a new subagent session and returns its ID.
+	SpawnSubagent func(task, systemPromptAppend string) (string, error)
+	// ListSubagents returns a snapshot of active subagent sessions.
+	ListSubagents func() []map[string]any
+	// AnswerSubagent routes an answer to a waiting subagent.
+	AnswerSubagent func(sessionID, answer string) error
+	// GetSubagentStatus returns (status, result, pendingQuestion, error) for a session.
+	GetSubagentStatus func(sessionID string) (status, result, pendingQuestion string, err error)
 }

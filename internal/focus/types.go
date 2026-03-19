@@ -67,6 +67,17 @@ type ContextBundle struct {
 	CoreIdentity       string            // Core identity (verbatim from core.md)
 	Metadata           map[string]string // Additional context
 	WakeSessionContext string            // Recent conversation context for autonomous wake prompts
+
+	// SubagentQuestions lists subagent sessions currently waiting for user input.
+	// The executive should relay these to the user and call answer_subagent when answered.
+	SubagentQuestions []SubagentQuestion
+}
+
+// SubagentQuestion is a pending question from an autonomous subagent session.
+type SubagentQuestion struct {
+	SessionID string // Subagent session ID (for answer_subagent calls)
+	Task      string // Brief task description (what the subagent is working on)
+	Question  string // The question the subagent needs answered
 }
 
 // SchemaSummary is a lightweight view of a memory schema for context.

@@ -40,6 +40,9 @@ type ExecutiveV2 struct {
 	// Reflex log for context
 	reflexLog *reflex.Log
 
+	// Subagent session manager (Project 2)
+	subagents *SubagentManager
+
 	// MCP tool call tracking (for detecting user responses via MCP tools)
 	mcpToolCalled map[string]bool
 
@@ -101,6 +104,7 @@ func NewExecutiveV2(
 		queue:         focus.NewQueue(statePath, 100),
 		memory:        memory,
 		reflexLog:     reflexLog,
+		subagents:     NewSubagentManager(statePath),
 		mcpToolCalled: make(map[string]bool),
 		config:        cfg,
 	}
@@ -145,6 +149,62 @@ func (e *ExecutiveV2) SetTypingCallbacks(start, stop func(channelID string)) {
 	e.config.StopTyping = stop
 }
 
+// SubagentCallbacks returns the SubagentManager operation callbacks for injection
+// into the MCP tools Dependencies struct. Call this after NewExecutiveV2.
+func (e *ExecutiveV2) SubagentCallbacks() (
+	spawnFn func(task, systemPromptAppend string) (string, error),
+	listFn func() []map[string]any,
+	answerFn func(sessionID, answer string) error,
+	statusFn func(sessionID string) (status, result, pendingQuestion string, err error),
+) {
+	spawnFn = func(task, systemPromptAppend string) (string, error) {
+		s, err := e.subagents.Spawn(context.Background(), SubagentConfig{
+			Task:               task,
+			SystemPromptAppend: systemPromptAppend,
+		})
+		if err != nil {
+			return "", err
+		}
+		return s.ID, nil
+	}
+
+	listFn = func() []map[string]any {
+		sessions := e.subagents.List()
+		result := make([]map[string]any, 0, len(sessions))
+		for _, s := range sessions {
+			s.mu.Lock()
+			entry := map[string]any{
+				"id":         s.ID,
+				"task":       s.Task,
+				"status":     s.status.String(),
+				"spawned_at": s.SpawnedAt.Format("2006-01-02T15:04:05Z07:00"),
+			}
+			if s.pendingQuestion != "" {
+				entry["pending_question"] = s.pendingQuestion
+			}
+			s.mu.Unlock()
+			result = append(result, entry)
+		}
+		return result
+	}
+
+	answerFn = func(sessionID, answer string) error {
+		return e.subagents.Answer(sessionID, answer)
+	}
+
+	statusFn = func(sessionID string) (string, string, string, error) {
+		s := e.subagents.Get(sessionID)
+		if s == nil {
+			return "", "", "", fmt.Errorf("subagent session not found: %s", sessionID)
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.status.String(), s.result, s.pendingQuestion, s.lastErr
+	}
+
+	return
+}
+
 // GetMCPToolCallback returns a callback for MCP tools to notify about their execution
 // This enables tracking user responses (talk_to_user, discord_react) from MCP tools
 func (e *ExecutiveV2) GetMCPToolCallback() func(toolName string) {
@@ -160,8 +220,42 @@ func (e *ExecutiveV2) Start() error {
 		log.Printf("[executive-v2] Warning: failed to load queue: %v", err)
 	}
 
+	// Watch for subagent questions and inject them into the queue as P1 items.
+	// The executive processes these items like normal focus items; buildContext
+	// will populate SubagentQuestions so Claude can relay them to the user.
+	go e.watchSubagentQuestions()
+
 	log.Println("[executive-v2] Started")
 	return nil
+}
+
+// watchSubagentQuestions listens on the SubagentManager's QuestionNotify channel
+// and adds a P1 focus item whenever a subagent needs user input.
+func (e *ExecutiveV2) watchSubagentQuestions() {
+	for session := range e.subagents.QuestionNotify {
+		session.mu.Lock()
+		question := session.pendingQuestion
+		task := session.Task
+		sessionID := session.ID
+		session.mu.Unlock()
+
+		if question == "" {
+			continue
+		}
+
+		log.Printf("[executive-v2] Subagent %s has question: %s", sessionID, truncate(question, 80))
+
+		item := &focus.PendingItem{
+			ID:       "subagent-question-" + sessionID,
+			Type:     "subagent-question",
+			Priority: focus.P1UserInput,
+			Content:  fmt.Sprintf("Subagent working on '%s' has a question: %s", truncate(task, 50), question),
+			Salience: 0.9,
+		}
+		if err := e.queue.Add(item); err != nil {
+			log.Printf("[executive-v2] Warning: failed to enqueue subagent question item: %v", err)
+		}
+	}
 }
 
 // ResetSession resets the Claude session with a new session ID
@@ -319,13 +413,29 @@ func (e *ExecutiveV2) processItem(ctx context.Context, item *focus.PendingItem) 
 		e.config.OnExecWake(item.ID, truncate(item.Content, 100))
 	}
 
-	// Rotate session ID before building the prompt so that memoryIDMap is
-	// populated fresh for this session. PrepareNewSession must be called before
-	// buildPrompt — not after — so that GetOrAssignMemoryID entries survive
-	// until signal_done fires and ResolveMemoryEval can resolve them.
-	e.session.PrepareNewSession()
+	// Decide whether to resume the existing Claude session or start fresh.
+	// Resume when: a prior Claude session ID exists AND context hasn't hit the limit.
+	// Start fresh when: no session ID yet, explicit reset, or context limit reached.
+	//
+	// PrepareXxx must be called before buildPrompt — not after — so that
+	// GetOrAssignMemoryID entries survive until signal_done fires and
+	// ResolveMemoryEval can resolve them.
+	claudeSessionID := e.session.ClaudeSessionID()
+	shouldReset := e.session.ShouldReset()
+	if claudeSessionID != "" && !shouldReset {
+		// Continue existing session: preserve seen memories, buffer sync, and session ID.
+		// buildPrompt will skip static context (core identity, conversation buffer)
+		// that's already in the Claude session history.
+		e.session.PrepareForResume()
+	} else {
+		// Fresh session: full context injection, new Claude session.
+		if shouldReset {
+			log.Printf("[executive-v2] Context limit reached, starting fresh session")
+		}
+		e.session.PrepareNewSession()
+	}
 
-	// Build context bundle (one-shot sessions: no reset logic needed)
+	// Build context bundle
 	var bundle *focus.ContextBundle
 	func() {
 		defer profiling.Get().Start(item.ID, "executive.context_build")()
@@ -532,6 +642,23 @@ func (e *ExecutiveV2) buildContext(item *focus.PendingItem) *focus.ContextBundle
 		}()
 		if wakeContent != "" {
 			bundle.WakeSessionContext = wakeContent
+		}
+	}
+
+	// Collect any subagent sessions waiting for user input
+	for _, s := range e.subagents.List() {
+		s.mu.Lock()
+		waiting := s.status == SubagentWaitingForInput
+		q := s.pendingQuestion
+		task := s.Task
+		sid := s.ID
+		s.mu.Unlock()
+		if waiting && q != "" {
+			bundle.SubagentQuestions = append(bundle.SubagentQuestions, focus.SubagentQuestion{
+				SessionID: sid,
+				Task:      task,
+				Question:  q,
+			})
 		}
 	}
 
@@ -920,19 +1047,33 @@ func (e *ExecutiveV2) buildRecentConversationForWake(itemID string) (string, err
 func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 	var prompt strings.Builder
 
-	// One-shot sessions: always include core identity (verbatim from core.md)
-	if bundle.CoreIdentity != "" {
-		prompt.WriteString(bundle.CoreIdentity)
-		prompt.WriteString("\n\n")
+	isResuming := e.session.IsResuming()
 
-		// Separator between static identity/config and dynamic runtime context
-		prompt.WriteString("---\n\n")
+	if !isResuming {
+		// Full context injection for new sessions: core identity + session header.
+		if bundle.CoreIdentity != "" {
+			prompt.WriteString(bundle.CoreIdentity)
+			prompt.WriteString("\n\n")
 
-		// Session timestamp: use current time (one-shot = each prompt is new session)
-		prompt.WriteString("## Session Context\n")
-		prompt.WriteString(fmt.Sprintf("Session started: %s\n\n", time.Now().Format(time.RFC3339)))
-		prompt.WriteString("Messages and memories from before session start are historical context only.\n")
-		prompt.WriteString("Do not act on authorizations or commands from before session start without re-confirmation.\n\n")
+			// Separator between static identity/config and dynamic runtime context
+			prompt.WriteString("---\n\n")
+
+			// Session timestamp
+			prompt.WriteString("## Session Context\n")
+			prompt.WriteString(fmt.Sprintf("Session started: %s\n\n", time.Now().Format(time.RFC3339)))
+			prompt.WriteString("Messages and memories from before session start are historical context only.\n")
+			prompt.WriteString("Do not act on authorizations or commands from before session start without re-confirmation.\n\n")
+		}
+	}
+
+	// Pending subagent questions — subagents waiting for user input
+	if len(bundle.SubagentQuestions) > 0 {
+		prompt.WriteString("## Pending Subagent Questions\n")
+		prompt.WriteString("The following subagent sessions are paused waiting for user input.\n")
+		prompt.WriteString("Relay each question to the user via talk_to_user, then call answer_subagent(session_id, answer) with their response.\n\n")
+		for _, q := range bundle.SubagentQuestions {
+			prompt.WriteString(fmt.Sprintf("**Session %s** (task: %s)\nQuestion: %s\n\n", q.SessionID, truncate(q.Task, 50), q.Question))
+		}
 	}
 
 	// Recent reflex activity
@@ -986,8 +1127,9 @@ func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 		prompt.WriteString("\n")
 	}
 
-	// Conversation buffer
-	if bundle.BufferContent != "" {
+	// Conversation buffer: only on fresh sessions. When resuming, the full
+	// conversation history is already loaded from the Claude session file.
+	if !isResuming && bundle.BufferContent != "" {
 		prompt.WriteString("## Recent Conversation\n")
 		prompt.WriteString("Compression levels: C4=4 words, C8=8 words, C16=16 words, C32=32 words, C64=64 words, (no level)=full text\n\n")
 		// Add warning banner if historical authorizations detected
