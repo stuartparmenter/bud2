@@ -432,11 +432,14 @@ func (e *ExecutiveV2) processItem(ctx context.Context, item *focus.PendingItem) 
 		// Continue existing session: preserve seen memories, buffer sync, and session ID.
 		// buildPrompt will skip static context (core identity, conversation buffer)
 		// that's already in the Claude session history.
+		log.Printf("[executive-v2] Resuming Claude session: %s", claudeSessionID)
 		e.session.PrepareForResume()
 	} else {
 		// Fresh session: full context injection, new Claude session.
 		if shouldReset {
 			log.Printf("[executive-v2] Context limit reached, starting fresh session")
+		} else {
+			log.Printf("[executive-v2] Starting new Claude session (no prior session ID)")
 		}
 		e.session.PrepareNewSession()
 	}

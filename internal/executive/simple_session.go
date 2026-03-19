@@ -370,7 +370,7 @@ func (s *SimpleSession) SendPrompt(ctx context.Context, prompt string, cfg Claud
 			case *claudecode.ResultMessage:
 				s.claudeSessionID = m.SessionID
 				s.lastUsage = parseUsageFromResult(m)
-				logging.Debug("simple-session", "Result: session=%s turns=%d duration=%dms",
+				log.Printf("[simple-session] Claude session ID: %s (turns=%d duration=%dms)",
 					m.SessionID, m.NumTurns, m.DurationMs)
 			}
 		}
