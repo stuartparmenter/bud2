@@ -171,6 +171,7 @@ func (e *ExecutiveV2) SubagentCallbacks() (
 	statusFn func(sessionID string) (status, result, claudeSessionID, pendingQuestion string, err error),
 	stopFn func(sessionID string) error,
 	getLogFn func(sessionID string, lastN int) ([]map[string]any, error),
+	drainMemoriesFn func(sessionID string) ([]string, error),
 ) {
 	// subagentBaseTools is the default restricted tool set for subagents:
 	// standard file tools + search_memory only. No talk_to_user, signal_done, etc.
@@ -266,6 +267,19 @@ func (e *ExecutiveV2) SubagentCallbacks() (
 			result = append(result, entry)
 		}
 		return result, nil
+	}
+
+	drainMemoriesFn = func(sessionID string) ([]string, error) {
+		s := e.subagents.Get(sessionID)
+		if s == nil {
+			return nil, fmt.Errorf("subagent session not found: %s", sessionID)
+		}
+		staged := s.DrainStagedMemories()
+		contents := make([]string, 0, len(staged))
+		for _, m := range staged {
+			contents = append(contents, m.Content)
+		}
+		return contents, nil
 	}
 
 	return

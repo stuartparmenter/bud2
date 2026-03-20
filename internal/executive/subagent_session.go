@@ -69,6 +69,13 @@ func (s SubagentStatus) String() string {
 	}
 }
 
+// StagedMemory is a thought captured from a subagent's save_thought call,
+// held pending executive approval before being written to Engram.
+type StagedMemory struct {
+	Content  string    `json:"content"`
+	StagedAt time.Time `json:"staged_at"`
+}
+
 // SubagentSession manages a Claude SDK session for a specific task.
 // The subagent runs autonomously with a restricted tool set and surfaces
 // questions to the executive via the native AskUserQuestion tool.
@@ -106,6 +113,10 @@ type SubagentSession struct {
 	// events is a capped log of recent subagent activity (tool calls, text).
 	events      []SubagentEvent
 	lastEventAt time.Time
+
+	// stagedMemories holds save_thought calls intercepted during the session.
+	// The executive reviews and approves these before they are flushed to Engram.
+	stagedMemories []StagedMemory
 }
 
 // appendEvent records an event in the session's activity log (capped at maxSubagentEvents).
@@ -138,6 +149,34 @@ func (s *SubagentSession) LastEventAt() time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.lastEventAt
+}
+
+// AddStagedMemory records a thought intercepted from a save_thought call.
+func (s *SubagentSession) AddStagedMemory(content string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stagedMemories = append(s.stagedMemories, StagedMemory{
+		Content:  content,
+		StagedAt: time.Now(),
+	})
+}
+
+// StagedMemories returns a copy of all staged memories without clearing them.
+func (s *SubagentSession) StagedMemories() []StagedMemory {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]StagedMemory, len(s.stagedMemories))
+	copy(out, s.stagedMemories)
+	return out
+}
+
+// DrainStagedMemories returns all staged memories and clears the list.
+func (s *SubagentSession) DrainStagedMemories() []StagedMemory {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	memories := s.stagedMemories
+	s.stagedMemories = nil
+	return memories
 }
 
 // Status returns the current lifecycle status.
@@ -372,6 +411,15 @@ func (m *SubagentManager) runSession(ctx context.Context, session *SubagentSessi
 		input map[string]any,
 		permCtx claudecode.ToolPermissionContext,
 	) (claudecode.PermissionResult, error) {
+		if toolName == "mcp__bud2__save_thought" {
+			content, _ := input["content"].(string)
+			if content != "" {
+				session.AddStagedMemory(content)
+				log.Printf("[subagent-%s] staged memory: %s", session.ID[:8], truncate(content, 60))
+			}
+			return claudecode.NewPermissionResultDeny("Thought staged for executive review. It will be saved to memory after the executive approves it."), nil
+		}
+
 		if toolName != "AskUserQuestion" {
 			log.Printf("[subagent-%s] tool: %s", session.ID[:8], toolName)
 			return claudecode.NewPermissionResultAllow(), nil
@@ -570,6 +618,12 @@ CONSTRAINTS:
   You will receive the answer inline and can continue your work.
 - When your task is complete, finish your response with a clear summary of what you did.
 - Keep reasoning internal. Output decisions and outcomes, not your full thought process.
+
+MEMORY:
+- Use save_thought to record observations worth persisting (e.g., discoveries, decisions, patterns).
+- Thoughts are staged for executive review rather than written directly to memory.
+  The executive will approve and flush them after your task completes.
+- Be selective: only save things that are genuinely useful to recall later.
 `)
 
 	if cfg.SystemPromptAppend != "" {

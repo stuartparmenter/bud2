@@ -2021,6 +2021,42 @@ func registerSubagentTools(server *mcp.Server, deps *Dependencies) {
 			return fmt.Sprintf("Answer delivered to subagent %s. It will resume processing.", sessionID), nil
 		})
 	}
+
+	// approve_subagent_memories — flush staged memories to Engram after review
+	if deps.DrainSubagentMemories != nil && deps.AddThought != nil {
+		server.RegisterTool("approve_subagent_memories", mcp.ToolDef{
+			Description: "Approve and flush the staged save_thought memories from a subagent session to Engram. Subagent memory writes are intercepted and held for executive review — call this after a session completes to commit the thoughts you want to keep. Returns the list of approved memories.",
+			Properties: map[string]mcp.PropDef{
+				"session_id": {Type: "string", Description: "The subagent session ID"},
+			},
+			Required: []string{"session_id"},
+		}, func(ctx any, args map[string]any) (string, error) {
+			sessionID, ok := args["session_id"].(string)
+			if !ok || sessionID == "" {
+				return "", fmt.Errorf("session_id is required")
+			}
+			memories, err := deps.DrainSubagentMemories(sessionID)
+			if err != nil {
+				return "", err
+			}
+			if len(memories) == 0 {
+				return fmt.Sprintf("No staged memories for session %s.", sessionID), nil
+			}
+			var failed []string
+			for _, content := range memories {
+				if flushErr := deps.AddThought(content); flushErr != nil {
+					log.Printf("[approve_subagent_memories] Failed to flush memory: %v", flushErr)
+					failed = append(failed, content)
+				}
+			}
+			if len(failed) > 0 {
+				return "", fmt.Errorf("flushed %d/%d memories; %d failed", len(memories)-len(failed), len(memories), len(failed))
+			}
+			log.Printf("[approve_subagent_memories] Flushed %d memories from session %s", len(memories), sessionID)
+			data, _ := json.MarshalIndent(memories, "", "  ")
+			return fmt.Sprintf("Approved and saved %d memory/memories:\n%s", len(memories), string(data)), nil
+		})
+	}
 }
 
 func registerEvalTools(server *mcp.Server, deps *Dependencies) {

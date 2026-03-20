@@ -61,4 +61,7 @@ type Dependencies struct {
 	// GetSubagentLog returns the last N activity events for a session.
 	// Events include tool calls and text snippets with timestamps.
 	GetSubagentLog func(sessionID string, lastN int) ([]map[string]any, error)
+	// DrainSubagentMemories returns the staged save_thought memories for a session
+	// and clears the staging area. The caller should flush these to Engram.
+	DrainSubagentMemories func(sessionID string) ([]string, error)
 }
