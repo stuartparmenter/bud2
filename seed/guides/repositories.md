@@ -108,6 +108,28 @@ launchctl kickstart -k gui/501/com.bud.daemon
 3. **Restart**: `launchctl kickstart -k gui/501/com.bud.daemon`
 4. **Verify**: Check logs at `~/Library/Logs/bud.log`
 
+### Pre-Deploy Checklist
+
+When redeploying with subagents potentially running, follow this checklist to ensure continuity:
+
+1. **Run the redeploy-bud job** to save subagent state:
+   ```
+   spawn_subagent(job="redeploy-bud")
+   ```
+
+2. **Read the job output** — it will include:
+   - How many subagents were saved
+   - The exact announcement text to send
+
+3. **Announce to the user** using the text from the job output:
+   ```
+   talk_to_user("Deploying now: [reason]. N subagent(s) will be restarted after startup.")
+   ```
+
+4. **Call trigger_redeploy** — after the announcement, proceed with the deploy.
+
+After the new session starts, a startup impulse will automatically trigger the `startup` job, which reads the restart notes and re-spawns any interrupted subagents.
+
 ### Launchd Configuration
 
 The daemon runs via launchd plist at:

@@ -159,6 +159,7 @@ func main() {
 	autonomousEnabled := os.Getenv("AUTONOMOUS_ENABLED") == "true"
 	autonomousIntervalStr := os.Getenv("AUTONOMOUS_INTERVAL")
 	autonomousIdleRequiredStr := os.Getenv("AUTONOMOUS_IDLE_REQUIRED")
+	autonomousSessionCapStr := os.Getenv("AUTONOMOUS_SESSION_CAP")
 	dailyTokenBudgetStr := os.Getenv("DAILY_OUTPUT_TOKEN_BUDGET")
 	userTimezoneStr := os.Getenv("USER_TIMEZONE") // e.g., "Europe/Berlin"
 
@@ -170,11 +171,22 @@ func main() {
 		}
 	}
 
-	// Parse idle required before autonomous wake (default 15 minutes)
-	autonomousIdleRequired := 15 * time.Minute
+	// Parse idle required before autonomous wake (default 0 = no idle gate).
+	// Set AUTONOMOUS_IDLE_REQUIRED=15m to skip wakes while user is recently active.
+	autonomousIdleRequired := time.Duration(0)
 	if autonomousIdleRequiredStr != "" {
 		if d, err := time.ParseDuration(autonomousIdleRequiredStr); err == nil {
 			autonomousIdleRequired = d
+		}
+	}
+
+	// Parse autonomous session cap (default 8 minutes).
+	// Executive wake sessions are capped at this duration so they stay short
+	// and delegate real work to subagents rather than doing it inline.
+	autonomousSessionCap := 8 * time.Minute
+	if autonomousSessionCapStr != "" {
+		if d, err := time.ParseDuration(autonomousSessionCapStr); err == nil {
+			autonomousSessionCap = d
 		}
 	}
 
@@ -436,6 +448,17 @@ func main() {
 			_, _, _, _, _, _, _, peekFn := exec.SubagentCallbacks()
 			return peekFn(sessionID)
 		},
+		ListJobs: func(project string) ([]any, error) {
+			listings, err := executive.ListJobs(statePath, project)
+			if err != nil {
+				return nil, err
+			}
+			result := make([]any, len(listings))
+			for i, l := range listings {
+				result[i] = l
+			}
+			return result, nil
+		},
 	}
 
 	// Register all MCP tools
@@ -487,10 +510,11 @@ func main() {
 			Model:        claudeModel,
 			WorkDir:      statePath, // Run Claude from state/ to pick up .mcp.json
 			MCPServerURL: fmt.Sprintf("http://127.0.0.1:%s/mcp", mcpHTTPPort),
-			BotAuthor:          "Bud",     // Kept for compatibility, but no longer used
-			SessionTracker:     sessionTracker,
-			WakeupInstructions: wakeupInstructions,
-			DefaultChannelID:   discordChannel,
+			BotAuthor:                  "Bud", // Kept for compatibility, but no longer used
+			SessionTracker:             sessionTracker,
+			WakeupInstructions:         wakeupInstructions,
+			DefaultChannelID:           discordChannel,
+			MaxAutonomousSessionDuration: autonomousSessionCap,
 			SendMessageFallback: func(channelID, message string) error {
 				if fallbackSendMessage != nil {
 					return fallbackSendMessage(channelID, message)
@@ -1097,6 +1121,20 @@ func main() {
 			log.Printf("[main] Warning: failed to send startup message: %v", err)
 		}
 	}
+
+	// Inject startup impulse so the executive checks for interrupted subagents
+	go func() {
+		time.Sleep(3 * time.Second) // Let executive initialize
+		processInboxMessage(&memory.InboxMessage{
+			ID:        "startup-" + time.Now().Format("20060102T150405"),
+			Type:      "impulse",
+			Subtype:   "system",
+			Content:   "impulse:startup",
+			Priority:  3, // P3ActiveWork
+			Timestamp: time.Now(),
+			Status:    "pending",
+		})
+	}()
 
 	// Start calendar sense (optional, independent of Discord)
 	var calendarSense *senses.CalendarSense
