@@ -64,4 +64,6 @@ type Dependencies struct {
 	// DrainSubagentMemories returns the staged save_thought memories for a session
 	// and clears the staging area. The caller should flush these to Engram.
 	DrainSubagentMemories func(sessionID string) ([]string, error)
+	// PeekSubagentMemories returns the count of staged memories for a session without draining.
+	PeekSubagentMemories func(sessionID string) int
 }

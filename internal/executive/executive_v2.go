@@ -172,6 +172,7 @@ func (e *ExecutiveV2) SubagentCallbacks() (
 	stopFn func(sessionID string) error,
 	getLogFn func(sessionID string, lastN int) ([]map[string]any, error),
 	drainMemoriesFn func(sessionID string) ([]string, error),
+	peekMemoriesFn func(sessionID string) int,
 ) {
 	// subagentBaseTools is the default restricted tool set for subagents:
 	// standard file tools + search_memory only. No talk_to_user, signal_done, etc.
@@ -223,6 +224,9 @@ func (e *ExecutiveV2) SubagentCallbacks() (
 			}
 			if s.pendingQuestion != "" {
 				entry["pending_question"] = s.pendingQuestion
+			}
+			if n := len(s.stagedMemories); n > 0 {
+				entry["staged_memories_count"] = n
 			}
 			s.mu.Unlock()
 			result = append(result, entry)
@@ -280,6 +284,14 @@ func (e *ExecutiveV2) SubagentCallbacks() (
 			contents = append(contents, m.Content)
 		}
 		return contents, nil
+	}
+
+	peekMemoriesFn = func(sessionID string) int {
+		s := e.subagents.Get(sessionID)
+		if s == nil {
+			return 0
+		}
+		return len(s.StagedMemories())
 	}
 
 	return

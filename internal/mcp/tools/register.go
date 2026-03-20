@@ -1894,7 +1894,7 @@ func registerSubagentTools(server *mcp.Server, deps *Dependencies) {
 
 	// get_subagent_status — get detailed status for a session
 	server.RegisterTool("get_subagent_status", mcp.ToolDef{
-		Description: "Get the current status, result, pending question, and recent activity for a specific subagent session. Includes the last 5 tool calls/text events and a 'stuck' flag if the subagent has been silent for >2 minutes while running.",
+		Description: "Get the current status, result, pending question, and recent activity for a specific subagent session. Includes the last 5 tool calls/text events and a 'stuck' flag if the subagent has been silent for >2 minutes while running. When status is 'completed' and staged_memories_count > 0, call approve_subagent_memories to flush them to Engram.",
 		Properties: map[string]mcp.PropDef{
 			"session_id": {Type: "string", Description: "The subagent session ID returned by spawn_subagent"},
 		},
@@ -1923,6 +1923,12 @@ func registerSubagentTools(server *mcp.Server, deps *Dependencies) {
 		}
 		if pendingQuestion != "" {
 			out["pending_question"] = pendingQuestion
+		}
+		// Surface staged memory count so executive knows to approve.
+		if deps.PeekSubagentMemories != nil {
+			if n := deps.PeekSubagentMemories(sessionID); n > 0 {
+				out["staged_memories_count"] = n
+			}
 		}
 		// Include recent activity and stuck detection if available.
 		if deps.GetSubagentLog != nil {
