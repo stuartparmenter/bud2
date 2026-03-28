@@ -393,6 +393,9 @@ func registerMemoryTools(server *mcp.Server, deps *Dependencies) {
 				"source":    episode.Source,
 				"reply_to":  episode.ReplyTo,
 			}
+			if len(episode.Attachments) > 0 {
+				result["attachments"] = episode.Attachments
+			}
 
 			if len(summaries) > 0 {
 				result["summaries"] = summaries

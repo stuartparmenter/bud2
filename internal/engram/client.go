@@ -37,20 +37,21 @@ func NewClient(baseURL, apiKey string) *Client {
 
 // Episode represents a raw ingested memory (Tier 1).
 type Episode struct {
-	ID                string    `json:"id"`
-	Content           string    `json:"content"`
-	TokenCount        int       `json:"token_count"`
-	Source            string    `json:"source"`
-	Author            string    `json:"author,omitempty"`
-	AuthorID          string    `json:"author_id,omitempty"`
-	Channel           string    `json:"channel,omitempty"`
-	TimestampEvent    time.Time `json:"timestamp_event"`
-	TimestampIngested time.Time `json:"timestamp_ingested"`
-	DialogueAct       string    `json:"dialogue_act,omitempty"`
-	EntropyScore      float64   `json:"entropy_score,omitempty"`
-	Embedding         []float64 `json:"embedding,omitempty"`
-	ReplyTo           string    `json:"reply_to,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
+	ID                string           `json:"id"`
+	Content           string           `json:"content"`
+	TokenCount        int              `json:"token_count"`
+	Source            string           `json:"source"`
+	Author            string           `json:"author,omitempty"`
+	AuthorID          string           `json:"author_id,omitempty"`
+	Channel           string           `json:"channel,omitempty"`
+	TimestampEvent    time.Time        `json:"timestamp_event"`
+	TimestampIngested time.Time        `json:"timestamp_ingested"`
+	DialogueAct       string           `json:"dialogue_act,omitempty"`
+	EntropyScore      float64          `json:"entropy_score,omitempty"`
+	Embedding         []float64        `json:"embedding,omitempty"`
+	ReplyTo           string           `json:"reply_to,omitempty"`
+	CreatedAt         time.Time        `json:"created_at"`
+	Attachments       []map[string]any `json:"attachments,omitempty"`
 }
 
 // Entity represents an extracted named entity (Tier 2).
@@ -109,14 +110,15 @@ type RetrievalResult struct {
 
 // IngestEpisodeRequest is the body for POST /v1/episodes.
 type IngestEpisodeRequest struct {
-	Content        string    `json:"content"`
-	Source         string    `json:"source"`
-	Author         string    `json:"author,omitempty"`
-	AuthorID       string    `json:"author_id,omitempty"`
-	Channel        string    `json:"channel,omitempty"`
-	TimestampEvent time.Time `json:"timestamp_event,omitempty"`
-	ReplyTo        string    `json:"reply_to,omitempty"`
-	Embedding      []float64 `json:"embedding,omitempty"`
+	Content        string           `json:"content"`
+	Source         string           `json:"source"`
+	Author         string           `json:"author,omitempty"`
+	AuthorID       string           `json:"author_id,omitempty"`
+	Channel        string           `json:"channel,omitempty"`
+	TimestampEvent time.Time        `json:"timestamp_event,omitempty"`
+	ReplyTo        string           `json:"reply_to,omitempty"`
+	Embedding      []float64        `json:"embedding,omitempty"`
+	Attachments    []map[string]any `json:"attachments,omitempty"`
 }
 
 // IngestResult is the response from episode/thought ingestion.
@@ -307,7 +309,7 @@ func (c *Client) BoostTraces(traceIDs []string, boost, threshold float64) error 
 // GetEpisode fetches an episode by full ID or 5-char prefix.
 func (c *Client) GetEpisode(id string) (*Episode, error) {
 	var ep Episode
-	if err := c.get("/v1/episodes/"+url.PathEscape(id), nil, &ep); err != nil {
+	if err := c.get("/v1/episodes/"+url.PathEscape(id)+"?detail=full", nil, &ep); err != nil {
 		return nil, err
 	}
 	return &ep, nil

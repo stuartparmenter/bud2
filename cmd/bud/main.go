@@ -638,9 +638,21 @@ func main() {
 		}
 
 		var replyTo string
+		var attachments []map[string]any
 		if msg.Extra != nil {
 			if r, ok := msg.Extra["reply_to"].(string); ok {
 				replyTo = r
+			}
+			if attsRaw, ok := msg.Extra["attachments"]; ok {
+				if atts, ok := attsRaw.([]map[string]any); ok {
+					attachments = atts
+				} else if attsIface, ok := attsRaw.([]interface{}); ok {
+					for _, a := range attsIface {
+						if m, ok := a.(map[string]any); ok {
+							attachments = append(attachments, m)
+						}
+					}
+				}
 			}
 		}
 
@@ -652,6 +664,7 @@ func main() {
 			Channel:        msg.ChannelID,
 			TimestampEvent: msg.Timestamp,
 			ReplyTo:        replyTo,
+			Attachments:    attachments,
 		}
 
 		var result *engram.IngestResult
