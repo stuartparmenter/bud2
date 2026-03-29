@@ -48,6 +48,7 @@ func RegisterAll(server *mcp.Server, deps *Dependencies) {
 		registerSubagentTools(server, deps)
 	}
 	registerVMBrowserTools(server, deps)
+	registerImageGenTools(server, deps)
 }
 
 func registerCommunicationTools(server *mcp.Server, deps *Dependencies) {
