@@ -240,7 +240,7 @@ func main() {
 	}
 
 	// Seed system directories from defaults if missing
-	for _, dir := range []string{"guides", "agents", "skills", "workflows", "plugins"} {
+	for _, dir := range []string{"guides", "skills", "workflows", "plugins"} {
 		seedSystemDir(statePath, dir)
 	}
 

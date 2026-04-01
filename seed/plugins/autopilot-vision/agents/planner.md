@@ -3,7 +3,7 @@ name: planner
 description: Vision-level strategic planner. Use for determining product identity and market positioning through systematic analysis.
 model: opus
 color: magenta
-tools: [Agent(autopilot-vision:explorer, autopilot-vision:researcher), Skill]
+tools: [Agent(autopilot-vision:explorer, autopilot-vision:researcher), Skill, mcp__bud2__read_resource, mcp__bud2__gk_search, mcp__bud2__gk_search_keyword, mcp__bud2__gk_search_entities, mcp__bud2__gk_get_entity, mcp__bud2__gk_read_observation, mcp__bud2__gk_add_entities, mcp__bud2__gk_add_observations, mcp__bud2__gk_add_relationships, mcp__bud2__gk_validate_graph, mcp__bud2__gk_get_stats]
 skills: [gk-conventions]
 ---
 

@@ -3,7 +3,7 @@ name: explorer
 description: Codebase explorer for strategy-level assessment. Use to understand what's feasible and where the gaps are relative to the vision.
 model: sonnet
 color: cyan
-tools: [Read, Grep, Glob, Bash, Skill]
+tools: [Read, Grep, Glob, Bash, Skill, mcp__bud2__read_resource, mcp__bud2__gk_search, mcp__bud2__gk_search_keyword, mcp__bud2__gk_search_entities, mcp__bud2__gk_get_entity, mcp__bud2__gk_read_observation, mcp__bud2__gk_add_entities, mcp__bud2__gk_add_observations, mcp__bud2__gk_add_relationships, mcp__bud2__gk_validate_graph]
 skills: [gk-conventions]
 ---
 

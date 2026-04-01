@@ -55,7 +55,11 @@ func (p *GKPool) CallTool(domain, toolName string, args map[string]any) (string,
 	if err != nil {
 		return "", fmt.Errorf("gk(%s): %w", domain, err)
 	}
-	return client.CallTool(toolName, args)
+	result, err := client.CallTool(toolName, args)
+	if err != nil {
+		p.evict(dbPath)
+	}
+	return result, err
 }
 
 // ListResources lists all MCP resources available from the GK process for the given domain.
@@ -65,7 +69,11 @@ func (p *GKPool) ListResources(domain string) ([]ResourceInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gk(%s): %w", domain, err)
 	}
-	return client.ListResources()
+	result, err := client.ListResources()
+	if err != nil {
+		p.evict(dbPath)
+	}
+	return result, err
 }
 
 // ReadResource reads an MCP resource by URI from the GK process for the given domain.
@@ -75,7 +83,22 @@ func (p *GKPool) ReadResource(domain, uri string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("gk(%s): %w", domain, err)
 	}
-	return client.ReadResource(uri)
+	result, err := client.ReadResource(uri)
+	if err != nil {
+		p.evict(dbPath)
+	}
+	return result, err
+}
+
+// evict removes a stale entry from the pool so the next call restarts the process.
+func (p *GKPool) evict(dbPath string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if e, ok := p.entries[dbPath]; ok {
+		e.client.Close()
+		delete(p.entries, dbPath)
+		log.Printf("[gkpool] Evicted stale GK process for %s", dbPath)
+	}
 }
 
 // getOrStart returns the ProxyClient for the given dbPath, starting a new GK

@@ -3,7 +3,7 @@ name: planner
 description: Strategy-level planner. Use for determining strategic bets and investment themes given a product vision.
 model: opus
 color: magenta
-tools: [Agent(autopilot-strategy:explorer, autopilot-strategy:researcher), Skill]
+tools: [Agent(autopilot-strategy:explorer, autopilot-strategy:researcher), Skill, mcp__bud2__read_resource, mcp__bud2__gk_search, mcp__bud2__gk_search_keyword, mcp__bud2__gk_search_entities, mcp__bud2__gk_get_entity, mcp__bud2__gk_read_observation, mcp__bud2__gk_add_entities, mcp__bud2__gk_add_observations, mcp__bud2__gk_add_relationships, mcp__bud2__gk_validate_graph, mcp__bud2__gk_get_stats]
 skills: [gk-conventions]
 ---
 

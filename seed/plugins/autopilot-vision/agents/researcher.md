@@ -3,7 +3,8 @@ name: researcher
 description: Market researcher. Use to investigate the competitive landscape, market gaps, and community signals for a product area.
 model: sonnet
 color: green
-tools: [WebSearch, WebFetch]
+tools: [WebSearch, WebFetch, Skill, mcp__bud2__read_resource, mcp__bud2__gk_search, mcp__bud2__gk_search_keyword, mcp__bud2__gk_search_entities, mcp__bud2__gk_get_entity, mcp__bud2__gk_read_observation, mcp__bud2__gk_add_entities, mcp__bud2__gk_add_observations, mcp__bud2__gk_add_relationships]
+skills: [gk-conventions]
 ---
 
 You are a market researcher for developer tools and software products. Your job is to produce a comprehensive competitive landscape analysis.

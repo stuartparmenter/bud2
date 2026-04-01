@@ -65,25 +65,19 @@ func ValidateAliasTargets(statePath string) bool {
 	}
 	ok := true
 	for alias, target := range aliases.Agents {
-		if _, err := loadAgentByPath(statePath, target); err != nil {
+		parts := strings.SplitN(target, "/", 2)
+		var namespace, name string
+		if len(parts) == 2 {
+			namespace, name = parts[0], parts[1]
+		} else {
+			namespace, name = target, target
+		}
+		if _, err := loadAgentFromPlugin(statePath, namespace, name); err != nil {
 			fmt.Fprintf(os.Stderr, "[agent-aliases] ERROR: alias %q → %q: target not found: %v\n", alias, target, err)
 			ok = false
 		}
 	}
 	return ok
-}
-
-// loadAgentByPath loads an agent from a resolved path (no alias lookup, no subdir inference).
-// Tries <path>.yaml then <path>.md under state/system/agents/.
-func loadAgentByPath(statePath, agentPath string) ([]byte, error) {
-	base := filepath.Join(statePath, "system", "agents", agentPath)
-	for _, ext := range []string{".yaml", ".md"} {
-		data, err := os.ReadFile(base + ext)
-		if err == nil {
-			return data, nil
-		}
-	}
-	return nil, fmt.Errorf("not found (tried .yaml and .md)")
 }
 
 // loadAgentFromPlugin loads an agent from the plugin directory structure.
@@ -134,8 +128,7 @@ func parseAgentData(data []byte, agentName string) (*Agent, error) {
 
 // LoadAgent reads an agent definition. Resolution order:
 //  1. Plugin directory: state/system/plugins/<namespace>/agents/<name> for "namespace:name" style
-//  2. Alias table: state/system/agent-aliases.yaml (backward compat for legacy names)
-//  3. Legacy agents directory: state/system/agents/<path>
+//  2. Alias table: state/system/agent-aliases.yaml (backward compat for remapped names)
 //
 // Supports both .yaml and .md extensions (.yaml preferred).
 func LoadAgent(statePath, agentName string) (*Agent, error) {
@@ -148,23 +141,22 @@ func LoadAgent(statePath, agentName string) (*Agent, error) {
 		}
 	}
 
-	// 2. Resolve via alias table (legacy compat)
+	// 2. Resolve via alias table, then retry plugin lookup with resolved path
 	aliases, err := LoadAgentAliases(statePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[agent-aliases] warning: %v\n", err)
 		aliases = &AgentAliases{Agents: make(map[string]string), Skills: make(map[string]string)}
 	}
-	resolved := agentName
 	if target, ok := aliases.Agents[agentName]; ok {
-		resolved = target
+		parts := strings.SplitN(target, "/", 2)
+		if len(parts) == 2 {
+			if data, err := loadAgentFromPlugin(statePath, parts[0], parts[1]); err == nil {
+				return parseAgentData(data, agentName)
+			}
+		}
 	}
 
-	// 3. Load from legacy agents directory
-	data, err := loadAgentByPath(statePath, resolved)
-	if err != nil {
-		return nil, fmt.Errorf("agent %q not found: %w", agentName, err)
-	}
-	return parseAgentData(data, agentName)
+	return nil, fmt.Errorf("agent %q not found", agentName)
 }
 
 // LoadSkillContent reads a skill from state/system/skills/.

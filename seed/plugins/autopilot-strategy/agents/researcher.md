@@ -3,7 +3,7 @@ name: researcher
 description: Market researcher for strategy-level assessment. Use to check for market changes and validate strategic assumptions.
 model: sonnet
 color: green
-tools: [WebSearch, WebFetch, Skill]
+tools: [WebSearch, WebFetch, Skill, mcp__bud2__read_resource, mcp__bud2__gk_search, mcp__bud2__gk_search_keyword, mcp__bud2__gk_search_entities, mcp__bud2__gk_get_entity, mcp__bud2__gk_read_observation, mcp__bud2__gk_add_entities, mcp__bud2__gk_add_observations, mcp__bud2__gk_add_relationships]
 skills: [gk-conventions]
 ---
 

@@ -68,7 +68,7 @@ type Dependencies struct {
 
 	// Subagent management callbacks (optional — injected by executive)
 	// SpawnSubagent starts a new subagent session and returns its ID.
-	// profile is optional — if non-empty, loads the named agent from state/system/agents/.
+	// profile is optional — if non-empty, loads the named agent from state/system/plugins/.
 	// workflowInstanceID and workflowStep are optional workflow tracking fields.
 	// mcpURL overrides the MCP server URL for this subagent (used for domain routing).
 	SpawnSubagent func(task, systemPromptAppend, profile, workflowInstanceID, workflowStep, mcpURL string) (id string, logPath string, err error)
