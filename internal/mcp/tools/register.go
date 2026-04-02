@@ -802,7 +802,7 @@ func registerStateTools(server *mcp.Server, deps *Dependencies) {
 
 	// trigger_bud_redeploy - allows bud to request redeployment
 	server.RegisterTool("trigger_bud_redeploy", mcp.ToolDef{
-		Description: "Trigger a redeployment of the bud service. Use this after code changes have been pushed.",
+		Description: "Trigger a redeployment of the BUD AI agent service ONLY. NOT for sandmill.org or any other project. Use deploy_sandmill for sandmill.org deployments.",
 		Properties: map[string]mcp.PropDef{
 			"reason": {Type: "string", Description: "Reason for redeployment (optional)"},
 		},
@@ -830,6 +830,33 @@ func registerStateTools(server *mcp.Server, deps *Dependencies) {
 
 		log.Printf("Redeploy triggered: %s", reason)
 		return "Redeploy started. Service will restart momentarily.", nil
+	})
+
+	// deploy_sandmill - deploy sandmill.org via Dokku git push
+	server.RegisterTool("deploy_sandmill", mcp.ToolDef{
+		Description: "Deploy sandmill.org to production via Dokku. Use this after pushing commits to the sandmill repo. Runs scripts/deploy.sh from the sandmill directory.",
+		Properties: map[string]mcp.PropDef{
+			"commit": {Type: "string", Description: "Commit hash or description being deployed (for logging)"},
+		},
+	}, func(ctx any, args map[string]any) (string, error) {
+		commit, _ := args["commit"].(string)
+		if commit == "" {
+			commit = "latest"
+		}
+
+		deployScript := "/Users/thunder/src/sandmill/scripts/deploy.sh"
+		if _, err := os.Stat(deployScript); os.IsNotExist(err) {
+			return "", fmt.Errorf("sandmill deploy script not found: %s", deployScript)
+		}
+
+		cmd := exec.Command("bash", deployScript)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("sandmill deploy failed: %w\n%s", err, string(out))
+		}
+
+		log.Printf("Sandmill deployed: %s", commit)
+		return fmt.Sprintf("Sandmill deployed (%s). Output:\n%s", commit, string(out)), nil
 	})
 
 	// state_percepts - manage percepts
