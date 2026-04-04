@@ -8,6 +8,18 @@ user-invocable: true
 
 Extract atomic knowledge from a `notes/` file into the zettelkasten. This skill guides judgment — it does not auto-generate zettels.
 
+## Finding unmigrated notes
+
+To find all notes that have NOT yet been migrated, run:
+
+```bash
+grep -rL "migrated\|converted:" /Users/thunder/src/bud2/state/notes/*.md
+```
+
+This catches all legacy marker variants (`<!-- migrated to zettel:`, `<!-- migrated:`, `<!-- converted:`). Files without any of these are candidates.
+
+Do NOT check git history or look for zettel files by name — the marker in the source note is the authoritative signal.
+
 ## Steps
 
 ### 1. Read the source file
@@ -36,11 +48,13 @@ Mark each: `zettel` / `combine` / `skip`.
 
 ### 4. Mark the source file
 
-Add a comment at the very top of the source note (after any YAML frontmatter if present):
+Append a comment at the **bottom** of the source note:
 
 ```
-<!-- converted: YYYY-MM-DD, zettels: slug1, slug2, slug3 -->
+<!-- migrated: YYYY-MM-DD, zettels: slug1, slug2, slug3 -->
 ```
+
+(Legacy variants `<!-- converted:` and `<!-- migrated to zettel:` are equivalent — do not add a second marker if one already exists.)
 
 ### 5. Do NOT move or delete the source
 
