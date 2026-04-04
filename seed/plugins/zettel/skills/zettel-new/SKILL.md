@@ -46,6 +46,14 @@ Body: 50–200 words. Atomic — one idea per zettel. Self-contained: a reader s
 
 5. **Bidirectional links.** For each zettel listed in `links:`, open that file and add the new zettel's slug to its `links:` frontmatter array (if not already present).
 
+6. **MOC suggestions.** Run `Glob('state/zettel/moc-*.md')` to find existing Maps of Content. For each MOC whose topic matches the new zettel's tags, note it as a candidate. Surface 0–3 suggestions in this form:
+
+   > "This zettel could link into `moc-memory-systems` (shared tag: memory-retrieval). Add it?"
+
+   Do not add it automatically — surface the suggestion so the agent can decide and act.
+
+   Also check whether `state/zettel/INDEX.md` exists. If the new zettel is a strong entry point for a major topic, suggest whether it warrants a mention there.
+
 ## Quality checks
 
 - Body is 50–200 words

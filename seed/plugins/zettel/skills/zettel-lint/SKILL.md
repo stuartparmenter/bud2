@@ -10,7 +10,7 @@ Audit the zettel corpus for structural problems. Run periodically (every few wee
 
 ## Checks
 
-Run all four checks against `state/zettel/*.md`:
+Run all five checks against `state/zettel/*.md`:
 
 ### 1. Orphaned zettels
 A zettel with no incoming links — nothing in the corpus points to it. Likely too isolated to contribute to the knowledge web.
@@ -50,6 +50,17 @@ extract all tags, count frequency, flag count == 1
 Report: singleton tags + the zettel that uses them.
 Action: suggest merging with a similar existing tag or removing if the tag adds no value.
 
+### 5. Tag clusters with no MOC
+
+Tags that appear in 5+ zettels but have no corresponding `moc-<tag>.md` file. These are dense clusters that have outgrown ad-hoc linking and warrant a Map of Content.
+
+```
+for each tag with count >= 5: check if state/zettel/moc-<tag>.md exists
+```
+
+Report: list of tag clusters missing a MOC, with zettel count.
+Action: suggest running `zettel-index <tag>` for each flagged cluster.
+
 ## Output format
 
 ```
@@ -70,6 +81,9 @@ STALE SOURCES: N
 
 TAG DRIFT (singleton tags): N
 - "sparse-tag" used only in 20240320-slug — consider merging with "similar-tag"
+
+MOC GAPS (dense tag clusters with no MOC): N
+- "memory-retrieval" — 8 zettels, no moc-memory-retrieval.md → run: zettel-index memory-retrieval
 
 All clear: No issues found.
 ```
