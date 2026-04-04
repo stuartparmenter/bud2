@@ -146,6 +146,9 @@ func main() {
 	if statePath == "" {
 		statePath = "state"
 	}
+	if abs, err := filepath.Abs(statePath); err == nil {
+		statePath = abs
+	}
 	claudeModel := os.Getenv("CLAUDE_MODEL")
 	syntheticMode := os.Getenv("SYNTHETIC_MODE") == "true"
 	mcpHTTPPort := os.Getenv("MCP_HTTP_PORT")
@@ -240,7 +243,7 @@ func main() {
 	}
 
 	// Seed system directories from defaults if missing
-	for _, dir := range []string{"guides", "skills", "workflows", "plugins"} {
+	for _, dir := range []string{"guides", "workflows", "plugins"} {
 		seedSystemDir(statePath, dir)
 	}
 

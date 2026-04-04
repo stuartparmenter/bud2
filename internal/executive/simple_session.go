@@ -21,6 +21,29 @@ import (
 // higher-priority item (e.g. a P1 user message arriving during a background wake).
 var ErrInterrupted = errors.New("session interrupted by higher-priority item")
 
+// scanLocalPlugins returns the absolute path of each plugin directory under
+// state/system/plugins/ that contains a .claude-plugin/plugin.json file.
+// These are passed to Claude Code via --plugin-dir so skills are loaded without
+// needing manual symlinks in ~/.claude/plugins/marketplaces/.
+func scanLocalPlugins(statePath string) []string {
+	pluginsDir := filepath.Join(statePath, "system", "plugins")
+	entries, err := os.ReadDir(pluginsDir)
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		pluginJSON := filepath.Join(pluginsDir, e.Name(), ".claude-plugin", "plugin.json")
+		if _, err := os.Stat(pluginJSON); err == nil {
+			paths = append(paths, filepath.Join(pluginsDir, e.Name()))
+		}
+	}
+	return paths
+}
+
 const (
 	// MaxContextTokens is the threshold for context tokens before auto-reset.
 	// Uses cache_read_input_tokens from the API which tells us how much session
@@ -474,6 +497,9 @@ func (s *SimpleSession) SendPrompt(ctx context.Context, prompt string, cfg Claud
 	}
 	if len(cfg.AgentDefs) > 0 {
 		baseOpts = append(baseOpts, claudecode.WithAgents(cfg.AgentDefs))
+	}
+	for _, pluginPath := range scanLocalPlugins(s.statePath) {
+		baseOpts = append(baseOpts, claudecode.WithLocalPlugin(pluginPath))
 	}
 
 	// Resume existing Claude session when available, otherwise let the SDK

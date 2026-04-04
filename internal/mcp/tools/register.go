@@ -21,6 +21,7 @@ import (
 	"github.com/vthunder/bud2/internal/mcp"
 	"github.com/vthunder/bud2/internal/reflex"
 	"github.com/vthunder/bud2/internal/types"
+	"gopkg.in/yaml.v3"
 )
 
 // generateToken creates a random 16-byte hex token for session identification.
@@ -65,6 +66,7 @@ func RegisterAll(server *mcp.Server, deps *Dependencies) {
 	RegisterResourceTools(server, deps)
 	registerVMBrowserTools(server, deps)
 	registerImageGenTools(server, deps)
+	registerProjectTools(server, deps)
 }
 
 func registerCommunicationTools(server *mcp.Server, deps *Dependencies) {
@@ -2301,6 +2303,150 @@ Outliers (|diff| >= 2): %d`,
 
 		log.Printf("Memory judge: evaluated %d samples, bias=%.2f, correlation=%.2f", report.SampleSize, report.Bias, report.Correlation)
 		return summary, nil
+	})
+}
+
+func registerProjectTools(server *mcp.Server, deps *Dependencies) {
+	projectsDir := filepath.Join(deps.StatePath, "projects")
+
+	type projectYAML struct {
+		Name        string   `yaml:"name"`
+		Repos       []string `yaml:"repos"`
+		ThingsID    string   `yaml:"things_project_id"`
+		Status      string   `yaml:"status"`
+		Description string   `yaml:"description"`
+	}
+
+	// list_projects
+	server.RegisterTool("list_projects", mcp.ToolDef{
+		Description: "List all projects in state/projects/. Returns metadata from project.yaml files. Use this before working on anything that touches a repo or source file to find the relevant project context.",
+		Properties:  map[string]mcp.PropDef{},
+	}, func(ctx any, args map[string]any) (string, error) {
+		type projectEntry struct {
+			Path        string   `json:"path"`
+			Name        string   `json:"name"`
+			Status      string   `json:"status"`
+			Description string   `json:"description"`
+			Repos       []string `json:"repos,omitempty"`
+			HasNotes    bool     `json:"has_notes"`
+		}
+
+		var projects []projectEntry
+
+		err := filepath.WalkDir(projectsDir, func(path string, d os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return nil
+			}
+			if d.IsDir() || d.Name() != "project.yaml" {
+				return nil
+			}
+
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+
+			var p projectYAML
+			if err := yaml.Unmarshal(data, &p); err != nil {
+				return nil
+			}
+
+			rel, _ := filepath.Rel(projectsDir, filepath.Dir(path))
+			_, notesErr := os.Stat(filepath.Join(filepath.Dir(path), "notes.md"))
+
+			projects = append(projects, projectEntry{
+				Path:        rel,
+				Name:        p.Name,
+				Status:      p.Status,
+				Description: p.Description,
+				Repos:       p.Repos,
+				HasNotes:    notesErr == nil,
+			})
+			return nil
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to list projects: %w", err)
+		}
+
+		data, _ := json.MarshalIndent(projects, "", "  ")
+		return string(data), nil
+	})
+
+	// create_project
+	server.RegisterTool("create_project", mcp.ToolDef{
+		Description: "Create a new project in state/projects/ with project.yaml and notes.md. See state/system/guides/projects.md for project structure conventions.",
+		Properties: map[string]mcp.PropDef{
+			"path":        {Type: "string", Description: "Project path relative to state/projects/ (e.g. 'avail/myproject' or 'myproject')"},
+			"name":        {Type: "string", Description: "Human-readable project name"},
+			"description": {Type: "string", Description: "One-line description of the project"},
+			"repos":       {Type: "string", Description: "Comma-separated GitHub repos (e.g. 'owner/repo1,owner/repo2'). Optional."},
+			"status":      {Type: "string", Description: "Project status: active, paused, or archived (default: active)"},
+		},
+		Required: []string{"path", "name", "description"},
+	}, func(ctx any, args map[string]any) (string, error) {
+		projectPath, ok := args["path"].(string)
+		if !ok || projectPath == "" {
+			return "", fmt.Errorf("path is required")
+		}
+		name, ok := args["name"].(string)
+		if !ok || name == "" {
+			return "", fmt.Errorf("name is required")
+		}
+		description, _ := args["description"].(string)
+
+		status := "active"
+		if s, ok := args["status"].(string); ok && s != "" {
+			status = s
+		}
+
+		var repos []string
+		if reposStr, ok := args["repos"].(string); ok && reposStr != "" {
+			for _, r := range strings.Split(reposStr, ",") {
+				if r = strings.TrimSpace(r); r != "" {
+					repos = append(repos, r)
+				}
+			}
+		}
+
+		dir := filepath.Join(projectsDir, projectPath)
+		yamlPath := filepath.Join(dir, "project.yaml")
+
+		if _, err := os.Stat(yamlPath); err == nil {
+			return "", fmt.Errorf("project already exists at %s", projectPath)
+		}
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return "", fmt.Errorf("failed to create project directory: %w", err)
+		}
+
+		p := projectYAML{
+			Name:        name,
+			Repos:       repos,
+			ThingsID:    "",
+			Status:      status,
+			Description: description,
+		}
+		yamlData, err := yaml.Marshal(p)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal project.yaml: %w", err)
+		}
+		if err := os.WriteFile(yamlPath, yamlData, 0644); err != nil {
+			return "", fmt.Errorf("failed to write project.yaml: %w", err)
+		}
+
+		notesPath := filepath.Join(dir, "notes.md")
+		notesContent := fmt.Sprintf("# %s\n\nActive context and scratchpad for %s.\n", name, name)
+		if err := os.WriteFile(notesPath, []byte(notesContent), 0644); err != nil {
+			return "", fmt.Errorf("failed to write notes.md: %w", err)
+		}
+
+		result := map[string]any{
+			"created":  true,
+			"path":     dir,
+			"yaml":     yamlPath,
+			"notes":    notesPath,
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return string(data), nil
 	})
 }
 

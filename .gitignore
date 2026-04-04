@@ -28,3 +28,4 @@ deploy/com.bud.daemon.plist
 deploy/com.bud.watcher.plist
 sdk-harness
 sdk-verify
+.DS_Store

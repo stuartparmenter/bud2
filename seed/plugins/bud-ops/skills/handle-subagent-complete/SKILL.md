@@ -61,7 +61,23 @@ autopilot-task:planner     → UP →  (done — tasks created in Things)
 
 ### Signal handling
 
-**`UP`**: The planner completed its level and wants to advance. Spawn the next-level planner:
+**`UP`**: The planner completed its level and wants to advance.
+
+**Gate check** — determine if this transition requires human approval before proceeding:
+- `vision → strategy`: **always gate**
+- `strategy → epic`: **always gate**
+- `epic → task`: auto-proceed (no gate)
+
+**If gated** (vision→strategy or strategy→epic):
+1. Extract `direction` from the agent output JSON.
+2. Call `talk_to_user` with a brief summary:
+   - Direction title and 1-sentence rationale
+   - The key candidate selected and why it won
+   - Ask: "Proceed to [next-level] planning? Reply `yes` to continue, `no` to stop, or `adjust: [notes]` to send feedback forward."
+3. Save a thought tagged `["autopilot", "gate", "pending", "<current-level>"]` containing: `next_agent` (e.g. `"autopilot-strategy:planner"`), the full context string (direction + project path), and a `feedback` slot (empty for now).
+4. Call `signal_done`. Do NOT spawn the next level yet — wait for user response.
+
+**If auto-proceed** (epic→task):
 1. Extract `direction` from the agent output JSON.
 2. Build context: include `direction.title`, `direction.description`, `direction.rationale`, and the project path from the current task.
 3. `Agent_spawn_async(task=<context>, agent="autopilot-<next-level>:planner")`.

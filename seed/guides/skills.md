@@ -1,6 +1,8 @@
 # Skills Guide
 
-Skills are prompt templates stored at `state/system/skills/<name>/SKILL.md` — the canonical location in the bud2 repo. `~/.claude/skills/<name>` are symlinks to these files; Claude Code loads skills from that symlink target. Each session loads their names and descriptions into `<system-reminder>`, making them available to Bud without reading the full file. When invoked via the `Skill` tool, the full SKILL.md body loads into the current session.
+Skills are prompt templates stored as plugin skills: `state/system/plugins/<plugin>/skills/<name>/SKILL.md`. Bud passes `--plugin-dir` for each plugin via SDK options at session start.
+
+Claude Code loads skills from all plugins and surfaces their names and descriptions in `<system-reminder>` each session. When invoked via the `Skill` tool, the full SKILL.md body loads into the current session.
 
 ## When to Use Skills
 
@@ -8,14 +10,34 @@ Scan the available skill list at the start of each user interaction. Invoke a sk
 - The user's request matches a skill's trigger description (e.g. "create a prd", "convert to ralph format")
 - A task type is clearly within a skill's domain, even if not explicitly requested
 
-Current skills and their triggers:
+Current skills and their triggers (grouped by plugin):
+
+**bud-ops** — Bud operational skills:
+- **handle-subagent-complete**: Process a completed subagent (retrieve output, close task, approve memories, act on next.action). Invoke when woken for a subagent-done focus item.
+- **start-workflow**: Start a multi-step planning workflow ("plan X", "create a plan for X", or named workflow).
+- **planning**: Execute MADE planning methodology — diverse candidates, binary rubrics, score, select. Use when conducting structured analysis at any planning level.
+- **things-operations**: Interact with Things 3 task tracker — create, query, claim, update issues. All planning work goes to the Bud area.
+- **gk-conventions**: Graph knowledge store conventions for planning agents — read guides, retrieve prior cycle data, store directions and observations.
+
+**dev** — Development skills:
 - **prd**: Planning features, writing requirements ("create a prd", "plan this feature", "requirements for X")
 - **ralph**: Converting existing PRDs to prd.json for autonomous execution
-- **made**: Structured decision evaluation for non-obvious choices with multiple viable approaches
 - **web-research**: Deep web research on a topic
 - **code-review**: Code review for a PR or changeset
+
+**sandmill** — Sandmill content skills:
+- **blog**: Manage the sandmill.org blog pipeline — list ideas, research, draft, polish, publish ("blog status", "research post", "draft post", "publish post").
+- **voice**: Interview the author to extract voice, then rewrite a blog post to match it ("voice interview", "rewrite this post", "doesn't sound like me").
 - **vm-control**: Observe and control the Sandmill Mac OS 8 emulator (screenshots, clicks, typing). Use when debugging the emulator state or running interactive VM sessions.
-- **handle-subagent-complete**: Process a completed subagent (retrieve output, close task, approve memories, act on next.action). Invoke when woken for a subagent-done focus item.
+
+**zettel** — Zettelkasten knowledge system:
+- **zettel-search**: Search existing zettels before creating new ones ("search zettels", "find zettel", "does a zettel exist for"). Always run before zettel-new.
+- **zettel-new**: Create a single new atomic zettel ("new zettel", "create zettel", "add to zettelkasten", "atomize this idea").
+- **zettel-convert**: Convert a notes/ file into one or more zettels ("convert note to zettel", "atomize this note", "zettelify").
+- **zettel-link**: Add a bidirectional link between two existing zettels ("link these zettels", "connect zettel", "relate two zettels").
+- **zettel-index**: Build or rebuild a Map of Content for a tag ("build zettel index", "create MOC", "map of content for", "index zettels by tag").
+- **zettel-archive**: Move an ephemeral notes/ file to notes/archive/ ("archive this note", "this note has no zettel value", "archive sprint brief").
+- **zettel-lint**: Periodic health check of the zettel corpus ("lint zettels", "check zettel health", "find orphaned zettels", "zettel maintenance"). Run every 2–4 weeks or after bulk conversions.
 
 Do NOT invoke a skill just because the topic is tangentially related. The skill's `description` field is authoritative — if the user's request doesn't match the trigger phrases, don't invoke it.
 
@@ -46,10 +68,17 @@ The conversation buffer provides continuity. No architectural change needed.
 
 ## Adding New Skills
 
-Skills live at `state/system/skills/<name>/SKILL.md`. After creating the SKILL.md, add a symlink:
-```bash
-ln -s /Users/thunder/src/bud2/state/system/skills/<name> ~/.claude/skills/<name>
-```
+All skills live in plugins. Skill loading is automatic — no symlinks needed.
+
+**Add to an existing plugin:**
+1. Create `state/system/plugins/<plugin>/skills/<name>/SKILL.md`
+2. Add to the "Current skills" list in this guide
+
+**Create a new plugin:**
+1. Create `state/system/plugins/<plugin>/.claude-plugin/plugin.json`
+2. Add skills in `state/system/plugins/<plugin>/skills/<name>/SKILL.md`
+3. Bud passes `--plugin-dir` for each plugin dir at session start via the SDK
+
 Then add the new skill to the "Current skills" list in this guide.
 
 Required frontmatter:
