@@ -1,29 +1,26 @@
-# Doc Plan: bud2 — 2026-04-05
+# Doc Plan: bud2 — 2026-04-06
 
 Scoring: centrality (0.30) + coverage gap (0.30) + complexity (0.20) + churn (0.10) + bug density (0.10)
-Qualitative override: +0.10 for cross-cutting concerns or (centrality + complexity) both in top quartile.
+Topics span modules — signals are the max across constituent modules.
 
-| Rank | Area | Score | Signals | Status |
-|------|------|-------|---------|--------|
-| 1 | `internal/executive` | 0.84 | 6 centrality, 9 files / 5193 LoC, 112 commits + 53 fix-commits/90d, no doc | missing (foundational) |
-| 2 | `internal/mcp` | 0.84 | 14 centrality, 9 files / 5485 LoC (register.go alone is 87k chars), 68 commits/90d, no doc | missing (foundational) |
-| 3 | `internal/types` | 0.72 | 28 centrality (most imported), no doc, 1 file / 214 LoC | missing (foundational) |
-| 4 | `internal/integrations` | 0.65 | 16 centrality, no doc, 2 files / 1482 LoC | missing (foundational) |
-| 5 | `cmd/bud` | 0.56 | no doc, 2 files / 1807 LoC, 121 commits + 55 fix-commits/90d (highest churn) | missing |
-| 6 | `internal/reflex` | 0.53 | 8 centrality, no doc, 4 files / 3049 LoC | missing |
-| 7 | `internal/focus` | 0.43 | 6 centrality, no doc, 3 files / 1142 LoC | missing |
-| 8 | `internal/senses` | 0.41 | no doc, 2 files / 1382 LoC, 10 fix-commits/90d (highest bug rate per LoC) | missing |
-| 9 | `internal/activity` | 0.40 | 6 centrality, no doc, 1 file / 935 LoC | missing |
-| 10 | `internal/effectors` | 0.39 | no doc, 2 files / 1426 LoC | missing |
-| 11 | `internal/budget` | 0.39 | 4 centrality, no doc, 3 files / 601 LoC | missing |
-| 12 | `internal/state` | 0.38 | 4 centrality, no doc, 1 file / 525 LoC, 17 commits/90d | missing |
-| 13 | `internal/memory` | 0.31 | 6 centrality, 5 files / 1178 LoC, partial coverage in v2-memory-architecture.md | partial |
-| 14 | `internal/gtd` | 0.31 | 10 centrality, 3 files / 1028 LoC, partial coverage in things-integration.md | partial |
-| 15 | `internal/engram` | 0.30 | 8 centrality, partial coverage in architecture/memory-research.md | partial |
+| Rank | Topic | Score | Key Modules | Signals | Status |
+|------|-------|-------|-------------|---------|--------|
+| 1 | Session Lifecycle & Context Assembly | 1.00 | `internal/executive`, `internal/types`, `internal/memory` | centrality 28, no doc, 112 commits/90d, 53 fix-commits (foundational) | missing |
+| 2 | MCP Tool Dispatch & Registration | 0.99 | `internal/mcp`, `internal/types` | centrality 28, no doc, complexity max (63.85), 68 commits/90d (foundational) | missing |
+| 3 | Subagent Orchestration | 0.98 | `internal/executive`, `internal/types`, `internal/effectors` | centrality 28, no doc, 112 commits/90d, 53 fix-commits | missing |
+| 4 | Reflex Evaluation Pipeline | 0.84 | `internal/reflex`, `internal/senses`, `internal/types` | centrality 28, no doc, 22 commits/90d, 8 fix-commits (foundational) | missing |
+| 5 | Attention & Salience Computation | 0.77 | `internal/focus`, `internal/types` | centrality 28, no doc, 16 commits/90d (foundational) | missing |
+| 6 | Wake Scheduling & Autonomous Sessions | 0.74 | `internal/executive`, `internal/focus`, `internal/budget` | no doc, 112 commits/90d, 53 fix-commits, high complexity | missing |
+| 7 | Token Budget & Session Caps | 0.74 | `internal/budget`, `internal/executive` | no doc, 112 commits/90d (inherited), 53 fix-commits, high complexity | missing |
+| 8 | Percept Ingestion & Senses | 0.69 | `internal/senses`, `internal/memory`, `internal/types` | centrality 28, no doc, 26 commits/90d | missing |
+| 9 | Seed Configuration & Plugin System | 0.66 | `cmd/bud`, `seed/` | no doc, 121 commits/90d (highest churn), 55 fix-commits (foundational) | missing |
+| 10 | External Integration Clients | 0.56 | `internal/integrations`, `internal/senses` | centrality 16, no doc, cross-cutting | missing |
+| 11 | Memory Consolidation Pipeline | 0.33 | `internal/engram`, `internal/memory`, `internal/embedding`, `internal/eval` | centrality 8, doc exists ~84d old, 26 commits/90d | stale |
+| 12 | GTD & Task Integration | 0.31 | `internal/gtd`, `things-mcp/` | centrality 10, things-integration.md exists, low churn | stale |
 
 ## Recommended next
 
-Run `dev:arch-doc internal/executive` on `internal/executive` — highest churn and bug density in the repo (112 commits, 53 fixes in 90 days) with no architectural doc; critical to understand before touching the session lifecycle.
+Run `dev:arch-doc "Session Lifecycle & Context Assembly"` on `bud2` — the executive is the most-changed module (112 commits/90d, 53 fixes) and lacks any architectural doc covering how sessions open, what context gets assembled, and how `signal_done` gates the next wake.
 
 ---
-_Generated: 2026-04-05T21:55:00Z | Commit: f18e5087_
+_Generated: 2026-04-06T00:08:00Z | Commit: 34809241_
