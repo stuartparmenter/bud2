@@ -16,11 +16,11 @@ Topics span modules — signals are the max across constituent modules.
 | 9 | Seed Configuration & Plugin System | 0.66 | `cmd/bud`, `seed/` | no doc, 121 commits/90d (highest churn), 55 fix-commits (foundational) | generated |
 | 10 | External Integration Clients | 0.56 | `internal/integrations`, `internal/senses` | centrality 16, no doc, cross-cutting | generated |
 | 11 | Memory Consolidation Pipeline | 0.33 | `internal/engram`, `internal/memory`, `internal/embedding`, `internal/eval` | centrality 8, doc exists ~84d old, 26 commits/90d. Source: `architecture/v2-memory-architecture.md` | generated |
-| 12 | GTD & Task Integration | 0.31 | `internal/gtd`, `things-mcp/` | centrality 10, low churn. Source: `things-integration.md` | stale |
+| 12 | GTD & Task Integration | 0.31 | `internal/gtd`, `things-mcp/` | centrality 10, low churn. Source: `things-integration.md` | generated |
 
 ## Recommended next
 
-Run `dev:arch-doc "GTD & Task Integration"` on `bud2` — ranks 1–11 are now generated; GTD & Task Integration is the next topic (rank 12, score 0.31, status stale).
+All topics generated. Run `dev:repo-doc bud2` to refresh the overview and doc-plan when significant new features land.
 
 ---
 _Generated: 2026-04-06T00:08:00Z | Commit: 34809241_
