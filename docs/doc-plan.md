@@ -14,13 +14,13 @@ Topics span modules — signals are the max across constituent modules.
 | 7 | Token Budget & Session Caps | 0.74 | `internal/budget`, `internal/executive` | no doc, 112 commits/90d (inherited), 53 fix-commits, high complexity | generated |
 | 8 | Percept Ingestion & Senses | 0.69 | `internal/senses`, `internal/memory`, `internal/types` | centrality 28, no doc, 26 commits/90d. Source: `architecture/message-flow.md` | generated |
 | 9 | Seed Configuration & Plugin System | 0.66 | `cmd/bud`, `seed/` | no doc, 121 commits/90d (highest churn), 55 fix-commits (foundational) | generated |
-| 10 | External Integration Clients | 0.56 | `internal/integrations`, `internal/senses` | centrality 16, no doc, cross-cutting | missing |
+| 10 | External Integration Clients | 0.56 | `internal/integrations`, `internal/senses` | centrality 16, no doc, cross-cutting | generated |
 | 11 | Memory Consolidation Pipeline | 0.33 | `internal/engram`, `internal/memory`, `internal/embedding`, `internal/eval` | centrality 8, doc exists ~84d old, 26 commits/90d. Source: `architecture/v2-memory-architecture.md` | stale |
 | 12 | GTD & Task Integration | 0.31 | `internal/gtd`, `things-mcp/` | centrality 10, low churn. Source: `things-integration.md` | stale |
 
 ## Recommended next
 
-Run `dev:arch-doc "External Integration Clients"` on `bud2` — ranks 1–9 are now generated; External Integration Clients is the next highest-priority undocumented topic (rank 10, score 0.56).
+Run `dev:arch-doc "Memory Consolidation Pipeline"` on `bud2` — ranks 1–10 are now generated; Memory Consolidation Pipeline is the next topic (rank 11, score 0.33, status stale).
 
 ---
 _Generated: 2026-04-06T00:08:00Z | Commit: 34809241_
