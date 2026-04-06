@@ -10,7 +10,7 @@ Topics span modules — signals are the max across constituent modules.
 | 3 | Subagent Orchestration | 0.98 | `internal/executive`, `internal/types`, `internal/effectors` | centrality 28, no doc, 112 commits/90d, 53 fix-commits | generated |
 | 4 | Reflex Evaluation Pipeline | 0.84 | `internal/reflex`, `internal/senses`, `internal/types` | centrality 28, no doc, 22 commits/90d, 8 fix-commits (foundational) | generated |
 | 5 | Attention & Salience Computation | 0.77 | `internal/focus`, `internal/types` | centrality 28, no doc, 16 commits/90d (foundational) | generated |
-| 6 | Wake Scheduling & Autonomous Sessions | 0.74 | `internal/executive`, `internal/focus`, `internal/budget` | no doc, 112 commits/90d, 53 fix-commits, high complexity | missing |
+| 6 | Wake Scheduling & Autonomous Sessions | 0.74 | `internal/executive`, `internal/focus`, `internal/budget` | no doc, 112 commits/90d, 53 fix-commits, high complexity | generated |
 | 7 | Token Budget & Session Caps | 0.74 | `internal/budget`, `internal/executive` | no doc, 112 commits/90d (inherited), 53 fix-commits, high complexity | missing |
 | 8 | Percept Ingestion & Senses | 0.69 | `internal/senses`, `internal/memory`, `internal/types` | centrality 28, no doc, 26 commits/90d. Source: `architecture/message-flow.md` | missing |
 | 9 | Seed Configuration & Plugin System | 0.66 | `cmd/bud`, `seed/` | no doc, 121 commits/90d (highest churn), 55 fix-commits (foundational) | missing |
@@ -20,7 +20,7 @@ Topics span modules — signals are the max across constituent modules.
 
 ## Recommended next
 
-Run `dev:arch-doc "Wake Scheduling & Autonomous Sessions"` on `bud2` — ranks 1–5 are now generated; Wake Scheduling & Autonomous Sessions is the next highest-priority undocumented topic (rank 6, score 0.74).
+Run `dev:arch-doc "Token Budget & Session Caps"` on `bud2` — ranks 1–6 are now generated; Token Budget & Session Caps is the next highest-priority undocumented topic (rank 7, score 0.74).
 
 ---
 _Generated: 2026-04-06T00:08:00Z | Commit: 34809241_
