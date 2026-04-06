@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 	"github.com/vthunder/bud2/internal/logging"
+	"gopkg.in/yaml.v3"
 )
 
 // ErrInterrupted is returned by SendPrompt when the session is cancelled by a
@@ -40,6 +42,133 @@ func scanLocalPlugins(statePath string) []string {
 		if _, err := os.Stat(pluginJSON); err == nil {
 			paths = append(paths, filepath.Join(pluginsDir, e.Name()))
 		}
+	}
+	return paths
+}
+
+// pluginManifest is the structure of state/system/plugins.yaml.
+type pluginManifest struct {
+	Plugins []string `yaml:"plugins"`
+}
+
+// pluginEntry holds the parsed fields from a plugins.yaml entry.
+type pluginEntry struct {
+	owner string
+	repo  string
+	path  string // subdirectory within repo, empty = root
+	ref   string // branch/tag/commit, empty = default branch
+}
+
+// parsePluginEntry parses "owner/repo[:path][@ref]".
+func parsePluginEntry(s string) (pluginEntry, error) {
+	var e pluginEntry
+	// Split ref first (last @)
+	if idx := strings.LastIndex(s, "@"); idx != -1 {
+		e.ref = s[idx+1:]
+		s = s[:idx]
+	}
+	// Split subpath (first :)
+	if idx := strings.Index(s, ":"); idx != -1 {
+		e.path = s[idx+1:]
+		s = s[:idx]
+	}
+	parts := strings.SplitN(s, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return pluginEntry{}, fmt.Errorf("invalid plugin entry %q: expected owner/repo", s)
+	}
+	e.owner = parts[0]
+	e.repo = parts[1]
+	return e, nil
+}
+
+// loadManifestPlugins reads state/system/plugins.yaml and ensures each listed
+// repo is cloned under ~/.cache/bud/plugins/. It returns the resolved local
+// paths (repo root or ":path" subdir) to pass to WithLocalPlugin.
+// Errors are logged and the failing entry is skipped — startup continues.
+func loadManifestPlugins(statePath string) []string {
+	manifestPath := filepath.Join(statePath, "system", "plugins.yaml")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("[plugins] failed to read plugins.yaml: %v", err)
+		}
+		return nil
+	}
+
+	var manifest pluginManifest
+	if err := yaml.Unmarshal(data, &manifest); err != nil {
+		log.Printf("[plugins] failed to parse plugins.yaml: %v", err)
+		return nil
+	}
+
+	cacheBase, err := os.UserCacheDir()
+	if err != nil {
+		log.Printf("[plugins] failed to resolve user cache dir: %v", err)
+		return nil
+	}
+	pluginCacheDir := filepath.Join(cacheBase, "bud", "plugins")
+
+	var paths []string
+	for _, raw := range manifest.Plugins {
+		e, err := parsePluginEntry(raw)
+		if err != nil {
+			log.Printf("[plugins] skipping %q: %v", raw, err)
+			continue
+		}
+
+		repoDir := filepath.Join(pluginCacheDir, e.owner, e.repo)
+
+		if _, err := os.Stat(repoDir); os.IsNotExist(err) {
+			// Clone the repo.
+			cloneURL := fmt.Sprintf("https://github.com/%s/%s.git", e.owner, e.repo)
+			args := []string{"clone", "--depth=1"}
+			if e.ref != "" {
+				args = append(args, "--branch", e.ref)
+			}
+			args = append(args, cloneURL, repoDir)
+			cmd := exec.Command("git", args...)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				log.Printf("[plugins] failed to clone %s: %v\n%s", cloneURL, err, out)
+				continue
+			}
+			log.Printf("[plugins] cloned %s/%s", e.owner, e.repo)
+		} else {
+			// Repo already exists — update it.
+			if e.ref != "" {
+				// Pinned ref: fetch then checkout.
+				fetch := exec.Command("git", "-C", repoDir, "fetch", "--depth=1", "origin", e.ref)
+				if out, err := fetch.CombinedOutput(); err != nil {
+					log.Printf("[plugins] failed to fetch %s/%s@%s: %v\n%s", e.owner, e.repo, e.ref, err, out)
+					// Non-fatal: use whatever is already checked out.
+				} else {
+					checkout := exec.Command("git", "-C", repoDir, "checkout", e.ref)
+					if out, err := checkout.CombinedOutput(); err != nil {
+						log.Printf("[plugins] failed to checkout %s/%s@%s: %v\n%s", e.owner, e.repo, e.ref, err, out)
+					}
+				}
+			} else {
+				// Floating: fast-forward pull.
+				pull := exec.Command("git", "-C", repoDir, "pull", "--ff-only")
+				if out, err := pull.CombinedOutput(); err != nil {
+					log.Printf("[plugins] failed to pull %s/%s: %v\n%s", e.owner, e.repo, err, out)
+					// Non-fatal: keep using the existing checkout.
+				}
+			}
+		}
+
+		localPath := repoDir
+		if e.path != "" {
+			localPath = filepath.Join(repoDir, e.path)
+		}
+
+		// Only include the path if it actually contains a plugin manifest.
+		pluginJSON := filepath.Join(localPath, ".claude-plugin", "plugin.json")
+		if _, err := os.Stat(pluginJSON); err != nil {
+			log.Printf("[plugins] skipping %s: no .claude-plugin/plugin.json at %s", raw, localPath)
+			continue
+		}
+
+		paths = append(paths, localPath)
 	}
 	return paths
 }
@@ -499,6 +628,9 @@ func (s *SimpleSession) SendPrompt(ctx context.Context, prompt string, cfg Claud
 		baseOpts = append(baseOpts, claudecode.WithAgents(cfg.AgentDefs))
 	}
 	for _, pluginPath := range scanLocalPlugins(s.statePath) {
+		baseOpts = append(baseOpts, claudecode.WithLocalPlugin(pluginPath))
+	}
+	for _, pluginPath := range loadManifestPlugins(s.statePath) {
 		baseOpts = append(baseOpts, claudecode.WithLocalPlugin(pluginPath))
 	}
 
