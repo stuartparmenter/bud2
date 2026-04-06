@@ -159,38 +159,24 @@ func LoadAgent(statePath, agentName string) (*Agent, error) {
 	return nil, fmt.Errorf("agent %q not found", agentName)
 }
 
-// LoadSkillContent reads a skill by name, searching all plugin directories.
+// LoadSkillContent reads a skill by name, searching the provided plugin directories.
 // Skill name may be "namespace:skill-name" or just "skill-name".
-// Search order: state/system/plugins/*/skills/<name>/ then state/system/skills/<name>/ (legacy).
-func LoadSkillContent(statePath, skillName string) (string, error) {
+// Search order: each pluginDir/skills/<name>/SKILL.md, then pluginDir/skills/<name>.md.
+func LoadSkillContent(pluginDirs []string, skillName string) (string, error) {
 	// Normalize: strip namespace prefix if present (e.g. "bud-ops:gk-conventions" → "gk-conventions")
 	shortName := skillName
 	if idx := strings.LastIndex(skillName, ":"); idx != -1 {
 		shortName = skillName[idx+1:]
 	}
 
-	// Build candidate paths: check all plugin dirs first, then legacy path
-	pluginsDir := filepath.Join(statePath, "system", "plugins")
+	// Build candidate paths from provided plugin dirs
 	var candidates []string
-	if entries, err := os.ReadDir(pluginsDir); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			// Prefer folder/SKILL.md format, then flat .md
-			candidates = append(candidates,
-				filepath.Join(pluginsDir, e.Name(), "skills", shortName, "SKILL.md"),
-				filepath.Join(pluginsDir, e.Name(), "skills", shortName+".md"),
-			)
-		}
+	for _, dir := range pluginDirs {
+		candidates = append(candidates,
+			filepath.Join(dir, "skills", shortName, "SKILL.md"),
+			filepath.Join(dir, "skills", shortName+".md"),
+		)
 	}
-	// Legacy fallback: state/system/skills/<name>/SKILL.md and flat .md
-	legacyBase := filepath.Join(statePath, "system", "skills", shortName)
-	candidates = append(candidates,
-		filepath.Join(legacyBase, "SKILL.md"),
-		legacyBase+".md",
-	)
-
 	for _, p := range candidates {
 		data, err := os.ReadFile(p)
 		if err != nil {
@@ -441,7 +427,7 @@ func ResolveSubagentConfig(statePath, agentName, baseTools string) (mergedTools,
 		if target, ok := aliases.Skills[skillName]; ok {
 			skillName = target
 		}
-		content, skillErr := LoadSkillContent(statePath, skillName)
+		content, skillErr := LoadSkillContent(allPluginDirs(statePath), skillName)
 		if skillErr != nil {
 			// Non-fatal: log and skip missing skills
 			_ = skillErr

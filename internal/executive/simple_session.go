@@ -173,6 +173,54 @@ func loadManifestPlugins(statePath string) []string {
 	return paths
 }
 
+// resolvedManifestPluginPaths reads state/system/plugins.yaml, parses entries
+// using parsePluginEntry, computes the expected cache path under
+// os.UserCacheDir()/bud/plugins/<owner>/<repo>[/<path>], and returns paths that
+// already exist on disk. No git operations — only returns already-cloned paths.
+func resolvedManifestPluginPaths(statePath string) []string {
+	manifestPath := filepath.Join(statePath, "system", "plugins.yaml")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return nil
+	}
+
+	var manifest pluginManifest
+	if err := yaml.Unmarshal(data, &manifest); err != nil {
+		return nil
+	}
+
+	cacheBase, err := os.UserCacheDir()
+	if err != nil {
+		return nil
+	}
+	pluginCacheDir := filepath.Join(cacheBase, "bud", "plugins")
+
+	var paths []string
+	for _, raw := range manifest.Plugins {
+		e, err := parsePluginEntry(raw)
+		if err != nil {
+			continue
+		}
+		repoDir := filepath.Join(pluginCacheDir, e.owner, e.repo)
+		localPath := repoDir
+		if e.path != "" {
+			localPath = filepath.Join(repoDir, e.path)
+		}
+		if _, err := os.Stat(localPath); err != nil {
+			continue
+		}
+		paths = append(paths, localPath)
+	}
+	return paths
+}
+
+// allPluginDirs returns all plugin directories: local (state/system/plugins/) and
+// manifest-cloned (~/Library/Caches/bud/plugins/). Used to pass --plugin-dir to
+// subagents and to search for skill content.
+func allPluginDirs(statePath string) []string {
+	return append(scanLocalPlugins(statePath), resolvedManifestPluginPaths(statePath)...)
+}
+
 const (
 	// MaxContextTokens is the threshold for context tokens before auto-reset.
 	// Uses cache_read_input_tokens from the API which tells us how much session

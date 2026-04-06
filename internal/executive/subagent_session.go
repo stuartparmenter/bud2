@@ -508,7 +508,7 @@ func (m *SubagentManager) runSession(ctx context.Context, session *SubagentSessi
 	if len(cfg.AgentDefs) > 0 {
 		opts = append(opts, claudecode.WithAgents(cfg.AgentDefs))
 	}
-	for _, pluginPath := range scanLocalPlugins(m.statePath) {
+	for _, pluginPath := range allPluginDirs(m.statePath) {
 		opts = append(opts, claudecode.WithLocalPlugin(pluginPath))
 	}
 

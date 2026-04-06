@@ -152,7 +152,7 @@ func LoadAllAgents(statePath string) (map[string]claudecode.AgentDefinition, err
 				if target, ok := aliases.Skills[skillName]; ok {
 					skillName = target
 				}
-				content, skillErr := LoadSkillContent(statePath, skillName)
+				content, skillErr := LoadSkillContent(allPluginDirs(statePath), skillName)
 				if skillErr != nil || content == "" {
 					continue
 				}
