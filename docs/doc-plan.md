@@ -11,7 +11,7 @@ Topics span modules — signals are the max across constituent modules.
 | 4 | Reflex Evaluation Pipeline | 0.84 | `internal/reflex`, `internal/senses`, `internal/types` | centrality 28, no doc, 22 commits/90d, 8 fix-commits (foundational) | generated |
 | 5 | Attention & Salience Computation | 0.77 | `internal/focus`, `internal/types` | centrality 28, no doc, 16 commits/90d (foundational) | generated |
 | 6 | Wake Scheduling & Autonomous Sessions | 0.74 | `internal/executive`, `internal/focus`, `internal/budget` | no doc, 112 commits/90d, 53 fix-commits, high complexity | generated |
-| 7 | Token Budget & Session Caps | 0.74 | `internal/budget`, `internal/executive` | no doc, 112 commits/90d (inherited), 53 fix-commits, high complexity | missing |
+| 7 | Token Budget & Session Caps | 0.74 | `internal/budget`, `internal/executive` | no doc, 112 commits/90d (inherited), 53 fix-commits, high complexity | generated |
 | 8 | Percept Ingestion & Senses | 0.69 | `internal/senses`, `internal/memory`, `internal/types` | centrality 28, no doc, 26 commits/90d. Source: `architecture/message-flow.md` | missing |
 | 9 | Seed Configuration & Plugin System | 0.66 | `cmd/bud`, `seed/` | no doc, 121 commits/90d (highest churn), 55 fix-commits (foundational) | missing |
 | 10 | External Integration Clients | 0.56 | `internal/integrations`, `internal/senses` | centrality 16, no doc, cross-cutting | missing |
@@ -20,7 +20,7 @@ Topics span modules — signals are the max across constituent modules.
 
 ## Recommended next
 
-Run `dev:arch-doc "Token Budget & Session Caps"` on `bud2` — ranks 1–6 are now generated; Token Budget & Session Caps is the next highest-priority undocumented topic (rank 7, score 0.74).
+Run `dev:arch-doc "Percept Ingestion & Senses"` on `bud2` — ranks 1–7 are now generated; Percept Ingestion & Senses is the next highest-priority undocumented topic (rank 8, score 0.69).
 
 ---
 _Generated: 2026-04-06T00:08:00Z | Commit: 34809241_
