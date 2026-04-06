@@ -10,7 +10,21 @@ Call `list_subagents`. For any completed subagent, call `get_subagent_log` to re
 
 If there's concrete work to do (sandmill, code changes, research), spawn a subagent for it. Do NOT do the work inline — subagents run for 30 min unattended while you stay short. Give the subagent a specific, self-contained task with clear output criteria.
 
-## 3. Light housekeeping only (no subagent needed)
+## 3. Idle fallback: doc-maintain
+
+If there's no concrete work to do (no pending Things tasks in the Bud area, no blocked subagents, nothing urgent), spawn a doc-maintain subagent:
+
+```
+Agent_spawn_async(
+  profile: "coder",
+  task: "Read state/system/plugins/dev/skills/doc-maintain/SKILL.md and follow its instructions exactly. Sub-skills (doc-scan, repo-doc, doc-audit, arch-doc) are at state/system/plugins/dev/skills/<name>/SKILL.md — read them when doc-maintain references them. Use --autonomous flag throughout. Stop after one improvement.",
+  constraints: "Idle fallback — no other tasks pending."
+)
+```
+
+Skip this if a doc-maintain subagent is already running (check `list_subagents` output from step 1).
+
+## 4. Light housekeeping only (no subagent needed)
 
 Short tasks you can do directly in <2 min:
 - Check `activity_recent` (5-10 entries) to understand what's in flight
