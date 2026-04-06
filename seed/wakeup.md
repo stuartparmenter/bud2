@@ -6,13 +6,18 @@ You have woken up without a user message. **You have ~8 minutes max — this is 
 
 Call `list_subagents`. For any completed subagent, call `get_subagent_log` to read its output. If the result is meaningful (disk fix, test run, analysis), call `talk_to_user` to surface it. For still-running ones, note their status.
 
-## 2. Spawn new subagent work
+## 2. Check Things task list
 
-If there's concrete work to do (sandmill, code changes, research), spawn a subagent for it. Do NOT do the work inline — subagents run for 30 min unattended while you stay short. Give the subagent a specific, self-contained task with clear output criteria.
+Call `gtd_list` filtered to the **Bud** area (or use Things MCP `things_get_area` for the Bud area). Look for tasks that are:
+- In "Today" or "Anytime" (not Someday/Maybe)
+- Not blocked by a dependency
+- Not already covered by a running subagent
+
+If you find one, pick the highest-priority actionable task and spawn a subagent for it. Do NOT do the work inline — subagents run for 30 min unattended while you stay short. Give the subagent a specific, self-contained task with clear output criteria, and note the Things task ID so it can be closed on completion.
 
 ## 3. Idle fallback: doc-maintain
 
-If there's no concrete work to do (no pending Things tasks in the Bud area, no blocked subagents, nothing urgent), spawn a doc-maintain subagent:
+If there are no actionable Things tasks in the Bud area (and no blocked subagents, nothing urgent from step 1), spawn a doc-maintain subagent:
 
 ```
 Agent_spawn_async(
