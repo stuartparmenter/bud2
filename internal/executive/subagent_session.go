@@ -221,8 +221,9 @@ func (s *SubagentSession) Err() error {
 // SubagentManager maintains a registry of active subagent sessions and
 // provides spawn/answer/status operations for the executive.
 type SubagentManager struct {
-	mu       sync.RWMutex
-	sessions map[string]*SubagentSession // keyed by session ID (Claude ID once known)
+	mu        sync.RWMutex
+	sessions  map[string]*SubagentSession // keyed by session ID (Claude ID once known)
+	statePath string                      // path to state directory (for plugin discovery)
 
 	// Notify executive when a subagent has a pending question
 	QuestionNotify chan *SubagentSession
@@ -236,6 +237,7 @@ type SubagentManager struct {
 func NewSubagentManager(stateDir string) *SubagentManager {
 	m := &SubagentManager{
 		sessions:       make(map[string]*SubagentSession),
+		statePath:      stateDir,
 		QuestionNotify: make(chan *SubagentSession, 16),
 		DoneNotify:     make(chan *SubagentSession, 16),
 	}
@@ -498,6 +500,9 @@ func (m *SubagentManager) runSession(ctx context.Context, session *SubagentSessi
 	}
 	if len(cfg.AgentDefs) > 0 {
 		opts = append(opts, claudecode.WithAgents(cfg.AgentDefs))
+	}
+	for _, pluginPath := range scanLocalPlugins(m.statePath) {
+		opts = append(opts, claudecode.WithLocalPlugin(pluginPath))
 	}
 
 	prompt := fmt.Sprintf("## Task\n%s\n\nBegin work on this task. When you are done, finish your response.", cfg.Task)
