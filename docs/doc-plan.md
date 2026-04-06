@@ -12,7 +12,7 @@ Topics span modules — signals are the max across constituent modules.
 | 5 | Attention & Salience Computation | 0.77 | `internal/focus`, `internal/types` | centrality 28, no doc, 16 commits/90d (foundational) | generated |
 | 6 | Wake Scheduling & Autonomous Sessions | 0.74 | `internal/executive`, `internal/focus`, `internal/budget` | no doc, 112 commits/90d, 53 fix-commits, high complexity | generated |
 | 7 | Token Budget & Session Caps | 0.74 | `internal/budget`, `internal/executive` | no doc, 112 commits/90d (inherited), 53 fix-commits, high complexity | generated |
-| 8 | Percept Ingestion & Senses | 0.69 | `internal/senses`, `internal/memory`, `internal/types` | centrality 28, no doc, 26 commits/90d. Source: `architecture/message-flow.md` | missing |
+| 8 | Percept Ingestion & Senses | 0.69 | `internal/senses`, `internal/memory`, `internal/types` | centrality 28, no doc, 26 commits/90d. Source: `architecture/message-flow.md` | generated |
 | 9 | Seed Configuration & Plugin System | 0.66 | `cmd/bud`, `seed/` | no doc, 121 commits/90d (highest churn), 55 fix-commits (foundational) | missing |
 | 10 | External Integration Clients | 0.56 | `internal/integrations`, `internal/senses` | centrality 16, no doc, cross-cutting | missing |
 | 11 | Memory Consolidation Pipeline | 0.33 | `internal/engram`, `internal/memory`, `internal/embedding`, `internal/eval` | centrality 8, doc exists ~84d old, 26 commits/90d. Source: `architecture/v2-memory-architecture.md` | stale |
@@ -20,7 +20,7 @@ Topics span modules — signals are the max across constituent modules.
 
 ## Recommended next
 
-Run `dev:arch-doc "Percept Ingestion & Senses"` on `bud2` — ranks 1–7 are now generated; Percept Ingestion & Senses is the next highest-priority undocumented topic (rank 8, score 0.69).
+Run `dev:arch-doc "Seed Configuration & Plugin System"` on `bud2` — ranks 1–8 are now generated; Seed Configuration & Plugin System is the next highest-priority undocumented topic (rank 9, score 0.66).
 
 ---
 _Generated: 2026-04-06T00:08:00Z | Commit: 34809241_
