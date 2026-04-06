@@ -159,32 +159,56 @@ func LoadAgent(statePath, agentName string) (*Agent, error) {
 	return nil, fmt.Errorf("agent %q not found", agentName)
 }
 
-// LoadSkillContent reads a skill from state/system/skills/.
-// Supports both folder format (<name>/SKILL.md) and flat format (<name>.md).
+// LoadSkillContent reads a skill by name, searching all plugin directories.
+// Skill name may be "namespace:skill-name" or just "skill-name".
+// Search order: state/system/plugins/*/skills/<name>/ then state/system/skills/<name>/ (legacy).
 func LoadSkillContent(statePath, skillName string) (string, error) {
-	base := filepath.Join(statePath, "system", "skills", skillName)
-	// Prefer folder format: <name>/SKILL.md
-	folderPath := filepath.Join(base, "SKILL.md")
-	skillPath := base + ".md"
-	if _, err := os.Stat(folderPath); err == nil {
-		skillPath = folderPath
+	// Normalize: strip namespace prefix if present (e.g. "bud-ops:gk-conventions" → "gk-conventions")
+	shortName := skillName
+	if idx := strings.LastIndex(skillName, ":"); idx != -1 {
+		shortName = skillName[idx+1:]
 	}
-	data, err := os.ReadFile(skillPath)
-	if err != nil {
-		return "", fmt.Errorf("skill %q not found: %w", skillName, err)
-	}
-	content := string(data)
 
-	// Strip YAML frontmatter (--- ... ---) if present — keep just the body
-	if strings.HasPrefix(content, "---\n") {
-		rest := content[4:]
-		endIdx := strings.Index(rest, "\n---\n")
-		if endIdx != -1 {
-			content = strings.TrimSpace(rest[endIdx+5:])
+	// Build candidate paths: check all plugin dirs first, then legacy path
+	pluginsDir := filepath.Join(statePath, "system", "plugins")
+	var candidates []string
+	if entries, err := os.ReadDir(pluginsDir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			// Prefer folder/SKILL.md format, then flat .md
+			candidates = append(candidates,
+				filepath.Join(pluginsDir, e.Name(), "skills", shortName, "SKILL.md"),
+				filepath.Join(pluginsDir, e.Name(), "skills", shortName+".md"),
+			)
 		}
 	}
+	// Legacy fallback: state/system/skills/<name>/SKILL.md and flat .md
+	legacyBase := filepath.Join(statePath, "system", "skills", shortName)
+	candidates = append(candidates,
+		filepath.Join(legacyBase, "SKILL.md"),
+		legacyBase+".md",
+	)
 
-	return content, nil
+	for _, p := range candidates {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		content := string(data)
+		// Strip YAML frontmatter (--- ... ---) if present — keep just the body
+		if strings.HasPrefix(content, "---\n") {
+			rest := content[4:]
+			endIdx := strings.Index(rest, "\n---\n")
+			if endIdx != -1 {
+				content = strings.TrimSpace(rest[endIdx+5:])
+			}
+		}
+		return content, nil
+	}
+
+	return "", fmt.Errorf("skill %q not found in any plugin dir", skillName)
 }
 
 // JobDef defines a reusable job template.
