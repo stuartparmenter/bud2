@@ -51,10 +51,6 @@ type ExecutiveV2 struct {
 	// Core identity (loaded from state/core.md)
 	coreIdentity string
 
-	// Programmatic agent definitions loaded from state/system/plugins/
-	// Passed to every Claude session via WithAgents so the built-in Agent
-	// tool can resolve "namespace:name" style references.
-	agentDefs map[string]claudecode.AgentDefinition
 
 	// Config
 	config ExecutiveV2Config
@@ -170,16 +166,18 @@ func NewExecutiveV2(
 		exec.coreIdentity = string(coreContent)
 	}
 
-	// Load programmatic agent definitions from state/system/plugins/
-	agentDefs, defsErr := LoadAllAgents(statePath)
-	if defsErr != nil {
-		log.Printf("[executive-v2] Warning: failed to load agent definitions: %v", defsErr)
-	} else {
-		exec.agentDefs = agentDefs
-		log.Printf("[executive-v2] Loaded %d agent definitions from plugins", len(agentDefs))
-	}
-
 	return exec
+}
+
+// loadAgentDefs loads programmatic agent definitions fresh from plugins on each call,
+// so changes to state/system/plugins/ take effect without restarting Bud.
+func (e *ExecutiveV2) loadAgentDefs() map[string]claudecode.AgentDefinition {
+	defs, err := LoadAllAgents(e.session.statePath)
+	if err != nil {
+		log.Printf("[executive-v2] Warning: failed to load agent definitions: %v", err)
+		return nil
+	}
+	return defs
 }
 
 // SetTypingCallbacks sets the typing indicator callbacks
@@ -238,7 +236,7 @@ func (e *ExecutiveV2) SubagentCallbacks() (
 			MCPServerURL:       resolvedMCPURL,
 			AllowedTools:       allowedTools,
 			WorkDir:            e.config.WorkDir,
-			AgentDefs:          e.agentDefs,
+			AgentDefs:          e.loadAgentDefs(),
 			WorkflowInstanceID: workflowInstanceID,
 			WorkflowStep:       workflowStep,
 		})
@@ -872,7 +870,7 @@ func (e *ExecutiveV2) processItem(ctx context.Context, item *focus.PendingItem) 
 		Model:        e.config.Model,
 		WorkDir:      e.config.WorkDir,
 		MCPServerURL: e.config.MCPServerURL,
-		AgentDefs:    e.agentDefs,
+		AgentDefs:    e.loadAgentDefs(),
 	}
 
 	startTime := time.Now()
