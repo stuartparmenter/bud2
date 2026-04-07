@@ -1594,12 +1594,8 @@ func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 	// Current focus item
 	if bundle.CurrentFocus != nil {
 		prompt.WriteString("## Current Focus\n")
-		prompt.WriteString(fmt.Sprintf("Type: %s\n", bundle.CurrentFocus.Type))
-		prompt.WriteString(fmt.Sprintf("Priority: %s\n", bundle.CurrentFocus.Priority))
-		if bundle.CurrentFocus.Source != "" {
-			prompt.WriteString(fmt.Sprintf("Source: %s\n", bundle.CurrentFocus.Source))
-		}
-		prompt.WriteString(fmt.Sprintf("Content: %s\n", bundle.CurrentFocus.Content))
+		prompt.WriteString(bundle.CurrentFocus.Content)
+		prompt.WriteString("\n")
 
 		// Surface reflex escalation context so the executive knows what the reflex pre-fetched
 		if escalated, _ := bundle.CurrentFocus.Data["_reflex_escalated"].(bool); escalated {
@@ -1628,46 +1624,35 @@ func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 			}
 		}
 
-		// Add metadata section if we have relevant data
-		if len(bundle.CurrentFocus.Data) > 0 {
-			// Extract common metadata fields
-			var metadata []string
-			if msgID, ok := bundle.CurrentFocus.Data["message_id"].(string); ok && msgID != "" {
-				metadata = append(metadata, fmt.Sprintf("  message_id: %s", msgID))
-			}
-
-			if len(metadata) > 0 {
-				prompt.WriteString("Metadata:\n")
-				prompt.WriteString(strings.Join(metadata, "\n"))
-				prompt.WriteString("\n")
-			}
-
-			// Surface attachments so the executive can view images/files via WebFetch
-			// Data["attachments"] may be []map[string]any (in-memory path) or []interface{} (after JSON round-trip)
-			if attsRaw, ok := bundle.CurrentFocus.Data["attachments"]; ok {
-				// Normalize to []map[string]any regardless of origin
-				var atts []map[string]any
-				switch v := attsRaw.(type) {
-				case []map[string]any:
-					atts = v
-				case []interface{}:
-					for _, item := range v {
-						if m, ok := item.(map[string]interface{}); ok {
-							atts = append(atts, m)
-						}
+		// Add message ID if present
+		if msgID, ok := bundle.CurrentFocus.Data["message_id"].(string); ok && msgID != "" {
+			prompt.WriteString(fmt.Sprintf("id: %s\n", msgID))
+		}
+		// Surface attachments so the executive can view images/files via WebFetch
+		// Data["attachments"] may be []map[string]any (in-memory path) or []interface{} (after JSON round-trip)
+		if attsRaw, ok := bundle.CurrentFocus.Data["attachments"]; ok {
+			// Normalize to []map[string]any regardless of origin
+			var atts []map[string]any
+			switch v := attsRaw.(type) {
+			case []map[string]any:
+				atts = v
+			case []interface{}:
+				for _, item := range v {
+					if m, ok := item.(map[string]interface{}); ok {
+						atts = append(atts, m)
 					}
 				}
-				if len(atts) > 0 {
-					prompt.WriteString("Attachments:\n")
-					for _, att := range atts {
-						url, _ := att["url"].(string)
-						filename, _ := att["filename"].(string)
-						ct, _ := att["content_type"].(string)
-						if ct == "" {
-							ct = "unknown"
-						}
-						prompt.WriteString(fmt.Sprintf("  - %s (%s): %s\n", filename, ct, url))
+			}
+			if len(atts) > 0 {
+				prompt.WriteString("Attachments:\n")
+				for _, att := range atts {
+					url, _ := att["url"].(string)
+					filename, _ := att["filename"].(string)
+					ct, _ := att["content_type"].(string)
+					if ct == "" {
+						ct = "unknown"
 					}
+					prompt.WriteString(fmt.Sprintf("  - %s (%s): %s\n", filename, ct, url))
 				}
 			}
 		}
@@ -1676,17 +1661,10 @@ func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 		// Render additional batched messages (co-equal P1 items in the same batch)
 		for _, af := range bundle.AdditionalFocus {
 			prompt.WriteString("## Additional Message\n")
-			prompt.WriteString(fmt.Sprintf("Content: %s\n", af.Content))
-			if len(af.Data) > 0 {
-				var metadata []string
-				if msgID, ok := af.Data["message_id"].(string); ok && msgID != "" {
-					metadata = append(metadata, fmt.Sprintf("  message_id: %s", msgID))
-				}
-				if len(metadata) > 0 {
-					prompt.WriteString("Metadata:\n")
-					prompt.WriteString(strings.Join(metadata, "\n"))
-					prompt.WriteString("\n")
-				}
+			prompt.WriteString(af.Content)
+			prompt.WriteString("\n")
+			if msgID, ok := af.Data["message_id"].(string); ok && msgID != "" {
+				prompt.WriteString(fmt.Sprintf("id: %s\n", msgID))
 			}
 			prompt.WriteString("\n")
 		}

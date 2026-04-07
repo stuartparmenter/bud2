@@ -263,7 +263,7 @@ func TestBuildPrompt_SuspendedTasks(t *testing.T) {
 }
 
 // TestBuildPrompt_CurrentFocusBasic verifies that the current focus item's
-// type, priority, source, and content are included.
+// content appears bare under ## Current Focus with no Type/Priority/Source labels.
 func TestBuildPrompt_CurrentFocusBasic(t *testing.T) {
 	exec := newTestExecutive(t)
 	bundle := &focus.ContextBundle{
@@ -276,22 +276,21 @@ func TestBuildPrompt_CurrentFocusBasic(t *testing.T) {
 	}
 	out := exec.buildPrompt(bundle)
 
-	checks := []string{
-		"## Current Focus",
-		"Type: user_input",
-		"Priority: P1:UserInput",
-		"Source: discord",
-		"Content: can you help me with this?",
+	if !strings.Contains(out, "## Current Focus") {
+		t.Errorf("expected ## Current Focus header, got:\n%s", out)
 	}
-	for _, want := range checks {
-		if !strings.Contains(out, want) {
-			t.Errorf("expected %q in output, got:\n%s", want, out)
+	if !strings.Contains(out, "can you help me with this?") {
+		t.Errorf("expected bare content in output, got:\n%s", out)
+	}
+	for _, unwanted := range []string{"Type:", "Priority:", "Source:", "Content:"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("expected %q to be absent from Current Focus output, got:\n%s", unwanted, out)
 		}
 	}
 }
 
-// TestBuildPrompt_CurrentFocusMetadata verifies that message_id appears in the Metadata block
-// and that channel_id and timestamp are omitted.
+// TestBuildPrompt_CurrentFocusMetadata verifies that message_id appears as "id: <value>"
+// with no Metadata wrapper, and that channel_id and timestamp are omitted.
 func TestBuildPrompt_CurrentFocusMetadata(t *testing.T) {
 	exec := newTestExecutive(t)
 	ts := time.Date(2026, 2, 1, 10, 0, 0, 0, time.UTC)
@@ -309,16 +308,10 @@ func TestBuildPrompt_CurrentFocusMetadata(t *testing.T) {
 	}
 	out := exec.buildPrompt(bundle)
 
-	checks := []string{
-		"Metadata:",
-		"message_id: msg-42",
+	if !strings.Contains(out, "id: msg-42") {
+		t.Errorf("expected \"id: msg-42\" in output, got:\n%s", out)
 	}
-	for _, want := range checks {
-		if !strings.Contains(out, want) {
-			t.Errorf("expected %q in output, got:\n%s", want, out)
-		}
-	}
-	for _, unwanted := range []string{"channel_id:", "2026-02-01"} {
+	for _, unwanted := range []string{"Metadata:", "message_id:", "channel_id:", "2026-02-01"} {
 		if strings.Contains(out, unwanted) {
 			t.Errorf("expected %q to be absent from output, got:\n%s", unwanted, out)
 		}
