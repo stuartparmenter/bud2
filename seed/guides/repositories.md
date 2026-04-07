@@ -10,6 +10,15 @@ Examples:
 - `~/src/bud2` - this project
 - `~/src/other-project` - other projects
 
+## Repository Documentation
+
+⚠️ Before working on any repository, check for existing docs in this order:
+1. `~/src/<repo>/docs/overview.md` (maintained repo)
+2. `state/projects/<repo>/overview.md` (reference repo)
+
+- If docs **exist**: read `overview.md` before proceeding. If `doc-meta.json` shows commits have landed since docs were generated, offer to regenerate via `dev:repo-doc`.
+- If docs **do not exist** in either location: offer to generate them with `dev:repo-doc` (the skill will ask where to write them).
+
 ## Making Changes
 
 ### Branch Workflow

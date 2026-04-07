@@ -222,18 +222,18 @@ func main() {
 	// Ensure state directory exists
 	os.MkdirAll(statePath, 0755)
 
-	// Initialize profiler
+	// Initialize profiler (disabled 2026-04-07; re-enable via BUD_PROFILE env var)
 	profileLevel := profiling.LevelOff
-	if pl := os.Getenv("BUD_PROFILE"); pl != "" {
-		switch pl {
-		case "minimal":
-			profileLevel = profiling.LevelMinimal
-		case "detailed":
-			profileLevel = profiling.LevelDetailed
-		case "trace":
-			profileLevel = profiling.LevelTrace
-		}
-	}
+	// if pl := os.Getenv("BUD_PROFILE"); pl != "" {
+	// 	switch pl {
+	// 	case "minimal":
+	// 		profileLevel = profiling.LevelMinimal
+	// 	case "detailed":
+	// 		profileLevel = profiling.LevelDetailed
+	// 	case "trace":
+	// 		profileLevel = profiling.LevelTrace
+	// 	}
+	// }
 	if err := profiling.Init(profileLevel, filepath.Join(statePath, "system", "profiling.jsonl")); err != nil {
 		log.Printf("Warning: failed to initialize profiler: %v", err)
 	} else if profileLevel != profiling.LevelOff {
