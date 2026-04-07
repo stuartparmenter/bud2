@@ -400,10 +400,14 @@ type zettelLibrariesFile struct {
 
 // generateZettelLibraries scans all plugin dirs for plugin.json files that
 // declare a "zettels" path and writes state/system/zettel-libraries.yaml.
+// Plugins loaded from the OS cache directory are always marked readonly.
 func generateZettelLibraries(statePath string) {
 	libraries := []zettelLibrary{
 		{Name: "home", Path: filepath.Join(statePath, "zettels"), Default: true},
 	}
+
+	cacheBase, _ := os.UserCacheDir()
+	pluginCacheDir := filepath.Join(cacheBase, "bud", "plugins")
 
 	for _, dir := range allPluginDirs(statePath) {
 		manifestPath := filepath.Join(dir, ".claude-plugin", "plugin.json")
@@ -426,11 +430,13 @@ func generateZettelLibraries(statePath string) {
 		if name == "" {
 			name = filepath.Base(dir)
 		}
+		// Cache checkouts are always readonly — never commit from a cached clone.
+		isCache := strings.HasPrefix(dir, pluginCacheDir)
 		zettelsPath := filepath.Join(dir, manifest.Zettels)
 		libraries = append(libraries, zettelLibrary{
 			Name:     name,
 			Path:     zettelsPath,
-			Readonly: manifest.Readonly,
+			Readonly: manifest.Readonly || isCache,
 		})
 	}
 
