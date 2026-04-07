@@ -143,7 +143,8 @@ func main() {
 	discordGuildID := os.Getenv("DISCORD_GUILD_ID") // For slash command registration
 	statePath := os.Getenv("STATE_PATH")
 	if statePath == "" {
-		statePath = "state"
+		home, _ := os.UserHomeDir()
+		statePath = filepath.Join(home, "Documents", "bud-state")
 	}
 	if abs, err := filepath.Abs(statePath); err == nil {
 		statePath = abs
