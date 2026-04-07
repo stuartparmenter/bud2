@@ -290,8 +290,8 @@ func TestBuildPrompt_CurrentFocusBasic(t *testing.T) {
 	}
 }
 
-// TestBuildPrompt_CurrentFocusMetadata verifies that message_id, channel_id,
-// and timestamp appear in the Metadata block.
+// TestBuildPrompt_CurrentFocusMetadata verifies that message_id appears in the Metadata block
+// and that channel_id and timestamp are omitted.
 func TestBuildPrompt_CurrentFocusMetadata(t *testing.T) {
 	exec := newTestExecutive(t)
 	ts := time.Date(2026, 2, 1, 10, 0, 0, 0, time.UTC)
@@ -312,12 +312,15 @@ func TestBuildPrompt_CurrentFocusMetadata(t *testing.T) {
 	checks := []string{
 		"Metadata:",
 		"message_id: msg-42",
-		"channel_id: chan-999",
-		"2026-02-01T10:00:00Z",
 	}
 	for _, want := range checks {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q in output, got:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"channel_id:", "2026-02-01"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("expected %q to be absent from output, got:\n%s", unwanted, out)
 		}
 	}
 }
