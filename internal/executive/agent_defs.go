@@ -76,23 +76,19 @@ func resolveGrantedSkills(grants *SkillGrants, key string) ([]string, bool) {
 	return nil, false
 }
 
-// LoadAllAgents scans state/system/plugins/*/agents/ and builds an AgentDefinition map
-// for use with the SDK's WithAgents option. Keys are "namespace:agent" (e.g.
-// "autopilot-vision:explorer", "bud:coder").
+// LoadAllAgents scans all plugin directories (local and manifest-cloned) for
+// agents/ subdirs and builds an AgentDefinition map for use with the SDK's
+// WithAgents option. Keys are "namespace:agent" (e.g. "autopilot-vision:explorer",
+// "bud:coder").
+//
+// knownTools is the list of MCP tool names (with their full mcp__<server>__ prefix)
+// used to expand wildcard patterns in tool_grants (e.g. "mcp__bud2__gk_*").
+// Pass nil to skip wildcard expansion (granted tools are added as literals only).
 //
 // For each agent, the prompt is assembled as: agent body + concatenated skill content
 // (same logic as ResolveSubagentConfig). The Tools list contains the agent's declared
 // tools with Agent(...) syntax normalized to plain "Agent".
-func LoadAllAgents(statePath string) (map[string]claudecode.AgentDefinition, error) {
-	pluginsDir := filepath.Join(statePath, "system", "plugins")
-	namespaces, err := os.ReadDir(pluginsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]claudecode.AgentDefinition{}, nil
-		}
-		return nil, fmt.Errorf("read plugins dir: %w", err)
-	}
-
+func LoadAllAgents(statePath string, knownTools []string) (map[string]claudecode.AgentDefinition, error) {
 	// Load aliases for skill resolution
 	aliases, aliasErr := LoadAgentAliases(statePath)
 	if aliasErr != nil {
@@ -102,14 +98,14 @@ func LoadAllAgents(statePath string) (map[string]claudecode.AgentDefinition, err
 	// Load centralized skill grants (optional — falls back to agent.Skills if missing)
 	grants, _ := LoadSkillGrants(statePath)
 
+	// Collect all plugin dirs (local + manifest) with their tool grants
+	pluginDirs := allPluginDirsForAgents(statePath)
+
 	defs := make(map[string]claudecode.AgentDefinition)
 
-	for _, nsEntry := range namespaces {
-		if !nsEntry.IsDir() {
-			continue
-		}
-		namespace := nsEntry.Name()
-		agentsDir := filepath.Join(pluginsDir, namespace, "agents")
+	for _, pd := range pluginDirs {
+		namespace := filepath.Base(pd.Path)
+		agentsDir := filepath.Join(pd.Path, "agents")
 
 		agentFiles, err := os.ReadDir(agentsDir)
 		if err != nil {
@@ -172,16 +168,36 @@ func LoadAllAgents(statePath string) (map[string]claudecode.AgentDefinition, err
 			}
 
 			// Build tools list, normalizing Agent(...) declarations to plain "Agent"
+			toolSeen := make(map[string]bool)
 			var tools []string
-			seen := make(map[string]bool)
 			for _, t := range agent.Tools {
 				t = strings.TrimSpace(t)
 				if strings.HasPrefix(t, "Agent(") {
 					t = "Agent"
 				}
-				if t != "" && !seen[t] {
-					seen[t] = true
+				if t != "" && !toolSeen[t] {
+					toolSeen[t] = true
 					tools = append(tools, t)
+				}
+			}
+
+			// Apply tool_grants from this plugin's manifest entry.
+			// Collect all grants whose pattern matches this agent key.
+			if len(pd.ToolGrants) > 0 {
+				var grantPatterns []string
+				for pattern := range pd.ToolGrants {
+					if matchesAgentPattern(pattern, key) {
+						grantPatterns = append(grantPatterns, pattern)
+					}
+				}
+				for _, pattern := range grantPatterns {
+					expanded := expandToolGrants(pd.ToolGrants[pattern], knownTools)
+					for _, t := range expanded {
+						if !toolSeen[t] {
+							toolSeen[t] = true
+							tools = append(tools, t)
+						}
+					}
 				}
 			}
 

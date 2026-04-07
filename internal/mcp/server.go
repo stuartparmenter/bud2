@@ -142,6 +142,15 @@ func (s *Server) ToolCount() int {
 	return len(s.definitions)
 }
 
+// ToolNames returns the names of all registered tools.
+func (s *Server) ToolNames() []string {
+	names := make([]string, len(s.definitions))
+	for i, def := range s.definitions {
+		names[i] = def.Name
+	}
+	return names
+}
+
 // Call invokes a registered tool handler directly (for use by the reflex engine without HTTP)
 func (s *Server) Call(toolName string, args map[string]any) (string, error) {
 	handler, ok := s.handlers[toolName]

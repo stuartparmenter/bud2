@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -48,42 +49,134 @@ func scanLocalPlugins(statePath string) []string {
 
 // pluginManifest is the structure of state/system/plugins.yaml.
 type pluginManifest struct {
-	Plugins []string `yaml:"plugins"`
+	Plugins []pluginManifestEntry `yaml:"plugins"`
 }
 
-// pluginEntry holds the parsed fields from a plugins.yaml entry.
-type pluginEntry struct {
+// pluginManifestEntry is a single entry in plugins.yaml.
+// Supports both string form ("owner/repo[:dir][@ref]") and object form
+// (with repo/dir/ref/path/tool_grants fields).
+type pluginManifestEntry struct {
+	// Populated for remote repo entries
 	owner string
 	repo  string
-	path  string // subdirectory within repo, empty = root
+	dir   string // subdirectory within repo, empty = root
 	ref   string // branch/tag/commit, empty = default branch
+	// Populated for local path entries
+	localPath string
+	// Tool grants: pattern -> list of tools (may include wildcards like mcp__bud2__gk_*)
+	ToolGrants map[string][]string
 }
 
-// parsePluginEntry parses "owner/repo[:path][@ref]".
-func parsePluginEntry(s string) (pluginEntry, error) {
-	var e pluginEntry
+// UnmarshalYAML handles both string ("owner/repo[:dir][@ref]") and
+// object form ({ repo: ..., dir: ..., ref: ..., path: ..., tool_grants: ... }).
+func (e *pluginManifestEntry) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		return e.parseRepoString(value.Value)
+	}
+	// Object form
+	var raw struct {
+		Repo       string              `yaml:"repo"`
+		Dir        string              `yaml:"dir"`
+		Ref        string              `yaml:"ref"`
+		Path       string              `yaml:"path"`
+		ToolGrants map[string][]string `yaml:"tool_grants"`
+	}
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	if raw.Repo != "" {
+		if err := e.parseRepoString(raw.Repo); err != nil {
+			return err
+		}
+		if raw.Dir != "" {
+			e.dir = raw.Dir
+		}
+		if raw.Ref != "" {
+			e.ref = raw.Ref
+		}
+	}
+	e.localPath = raw.Path
+	e.ToolGrants = raw.ToolGrants
+	return nil
+}
+
+// parseRepoString parses "owner/repo[:dir][@ref]" into the entry's fields.
+func (e *pluginManifestEntry) parseRepoString(s string) error {
 	// Split ref first (last @)
 	if idx := strings.LastIndex(s, "@"); idx != -1 {
 		e.ref = s[idx+1:]
 		s = s[:idx]
 	}
-	// Split subpath (first :)
+	// Split subdir (first :)
 	if idx := strings.Index(s, ":"); idx != -1 {
-		e.path = s[idx+1:]
+		e.dir = s[idx+1:]
 		s = s[:idx]
 	}
 	parts := strings.SplitN(s, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return pluginEntry{}, fmt.Errorf("invalid plugin entry %q: expected owner/repo", s)
+		return fmt.Errorf("invalid plugin entry %q: expected owner/repo", s)
 	}
 	e.owner = parts[0]
 	e.repo = parts[1]
-	return e, nil
+	return nil
+}
+
+// pluginDir associates a local filesystem path with any tool grants from its
+// manifest entry. Used when loading agent definitions.
+type pluginDir struct {
+	Path       string
+	ToolGrants map[string][]string // nil if no grants
+}
+
+// looksLikePluginDir returns true if the path appears to be a plugin directory
+// (has .claude-plugin/plugin.json, an agents/ subdir, or .md files).
+func looksLikePluginDir(dirPath string) bool {
+	if _, err := os.Stat(filepath.Join(dirPath, ".claude-plugin", "plugin.json")); err == nil {
+		return true
+	}
+	if _, err := os.Stat(filepath.Join(dirPath, "agents")); err == nil {
+		return true
+	}
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return false
+	}
+	for _, f := range entries {
+		if !f.IsDir() && strings.HasSuffix(f.Name(), ".md") {
+			return true
+		}
+	}
+	return false
+}
+
+// resolvePluginPathsFromLocalPath resolves a cache path into one or more plugin
+// directory paths. If the path itself looks like a plugin dir, it's returned
+// as-is. Otherwise its immediate subdirectories that look like plugin dirs are
+// returned (one-level-deep expansion for monorepo-style repos).
+func resolvePluginPathsFromLocalPath(localPath string) []string {
+	if _, err := os.Stat(filepath.Join(localPath, ".claude-plugin", "plugin.json")); err == nil {
+		return []string{localPath}
+	}
+	entries, err := os.ReadDir(localPath)
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		sub := filepath.Join(localPath, e.Name())
+		if looksLikePluginDir(sub) {
+			paths = append(paths, sub)
+		}
+	}
+	return paths
 }
 
 // loadManifestPlugins reads state/system/plugins.yaml and ensures each listed
 // repo is cloned under ~/.cache/bud/plugins/. It returns the resolved local
-// paths (repo root or ":path" subdir) to pass to WithLocalPlugin.
+// paths to pass to WithLocalPlugin.
 // Errors are logged and the failing entry is skipped — startup continues.
 func loadManifestPlugins(statePath string) []string {
 	manifestPath := filepath.Join(statePath, "system", "plugins.yaml")
@@ -109,10 +202,12 @@ func loadManifestPlugins(statePath string) []string {
 	pluginCacheDir := filepath.Join(cacheBase, "bud", "plugins")
 
 	var paths []string
-	for _, raw := range manifest.Plugins {
-		e, err := parsePluginEntry(raw)
-		if err != nil {
-			log.Printf("[plugins] skipping %q: %v", raw, err)
+	for _, e := range manifest.Plugins {
+		if e.owner == "" {
+			// Local path entry — no git ops needed.
+			if e.localPath != "" {
+				paths = append(paths, resolvePluginPathsFromLocalPath(e.localPath)...)
+			}
 			continue
 		}
 
@@ -157,27 +252,24 @@ func loadManifestPlugins(statePath string) []string {
 		}
 
 		localPath := repoDir
-		if e.path != "" {
-			localPath = filepath.Join(repoDir, e.path)
+		if e.dir != "" {
+			localPath = filepath.Join(repoDir, e.dir)
 		}
-
-		// Only include the path if it actually contains a plugin manifest.
-		pluginJSON := filepath.Join(localPath, ".claude-plugin", "plugin.json")
-		if _, err := os.Stat(pluginJSON); err != nil {
-			log.Printf("[plugins] skipping %s: no .claude-plugin/plugin.json at %s", raw, localPath)
+		if _, err := os.Stat(localPath); err != nil {
+			log.Printf("[plugins] skipping %s/%s: resolved path not found: %s", e.owner, e.repo, localPath)
 			continue
 		}
 
-		paths = append(paths, localPath)
+		paths = append(paths, resolvePluginPathsFromLocalPath(localPath)...)
 	}
 	return paths
 }
 
-// resolvedManifestPluginPaths reads state/system/plugins.yaml, parses entries
-// using parsePluginEntry, computes the expected cache path under
-// os.UserCacheDir()/bud/plugins/<owner>/<repo>[/<path>], and returns paths that
-// already exist on disk. No git operations — only returns already-cloned paths.
-func resolvedManifestPluginPaths(statePath string) []string {
+// resolvedManifestPluginDirs reads state/system/plugins.yaml and returns the
+// already-cloned plugin directories with their associated tool grants. No git
+// operations — only returns dirs that already exist on disk. Expands monorepo
+// entries one level deep (see resolvePluginPathsFromLocalPath).
+func resolvedManifestPluginDirs(statePath string) []pluginDir {
 	manifestPath := filepath.Join(statePath, "system", "plugins.yaml")
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -195,21 +287,38 @@ func resolvedManifestPluginPaths(statePath string) []string {
 	}
 	pluginCacheDir := filepath.Join(cacheBase, "bud", "plugins")
 
-	var paths []string
-	for _, raw := range manifest.Plugins {
-		e, err := parsePluginEntry(raw)
-		if err != nil {
-			continue
+	var dirs []pluginDir
+	for _, e := range manifest.Plugins {
+		var localPath string
+		if e.owner != "" {
+			repoDir := filepath.Join(pluginCacheDir, e.owner, e.repo)
+			localPath = repoDir
+			if e.dir != "" {
+				localPath = filepath.Join(repoDir, e.dir)
+			}
+		} else {
+			localPath = e.localPath
 		}
-		repoDir := filepath.Join(pluginCacheDir, e.owner, e.repo)
-		localPath := repoDir
-		if e.path != "" {
-			localPath = filepath.Join(repoDir, e.path)
+		if localPath == "" {
+			continue
 		}
 		if _, err := os.Stat(localPath); err != nil {
 			continue
 		}
-		paths = append(paths, localPath)
+		for _, p := range resolvePluginPathsFromLocalPath(localPath) {
+			dirs = append(dirs, pluginDir{Path: p, ToolGrants: e.ToolGrants})
+		}
+	}
+	return dirs
+}
+
+// resolvedManifestPluginPaths returns the paths from resolvedManifestPluginDirs
+// as a flat string slice (for backward-compat use in skill loading).
+func resolvedManifestPluginPaths(statePath string) []string {
+	dirs := resolvedManifestPluginDirs(statePath)
+	paths := make([]string, len(dirs))
+	for i, d := range dirs {
+		paths[i] = d.Path
 	}
 	return paths
 }
@@ -219,6 +328,61 @@ func resolvedManifestPluginPaths(statePath string) []string {
 // subagents and to search for skill content.
 func allPluginDirs(statePath string) []string {
 	return append(scanLocalPlugins(statePath), resolvedManifestPluginPaths(statePath)...)
+}
+
+// allPluginDirsForAgents returns all plugin directories with their associated
+// tool grants. Local plugins have no grants; manifest plugins carry their grants.
+func allPluginDirsForAgents(statePath string) []pluginDir {
+	var dirs []pluginDir
+	for _, p := range scanLocalPlugins(statePath) {
+		dirs = append(dirs, pluginDir{Path: p})
+	}
+	dirs = append(dirs, resolvedManifestPluginDirs(statePath)...)
+	return dirs
+}
+
+// matchesAgentPattern reports whether pattern matches agentKey (format "namespace:agent").
+// Supported patterns:
+//   - "*"             — matches any agent
+//   - "ns:*"          — matches any agent in namespace ns
+//   - "ns-*:*"        — matches any agent whose namespace starts with "ns-"
+//   - exact string    — literal match
+//   - path.Match glob — general glob
+func matchesAgentPattern(pattern, agentKey string) bool {
+	if pattern == "*" {
+		return true
+	}
+	if ok, _ := path.Match(pattern, agentKey); ok {
+		return true
+	}
+	return false
+}
+
+// expandToolGrants expands a list of tool name patterns (which may include glob
+// wildcards like "mcp__bud2__gk_*") against knownTools and returns the deduplicated
+// set of matching tool names.
+func expandToolGrants(grants []string, knownTools []string) []string {
+	seen := make(map[string]bool)
+	var result []string
+	for _, g := range grants {
+		if !strings.Contains(g, "*") {
+			if !seen[g] {
+				seen[g] = true
+				result = append(result, g)
+			}
+			continue
+		}
+		// Wildcard: match against knownTools
+		for _, kt := range knownTools {
+			if ok, _ := path.Match(g, kt); ok {
+				if !seen[kt] {
+					seen[kt] = true
+					result = append(result, kt)
+				}
+			}
+		}
+	}
+	return result
 }
 
 const (

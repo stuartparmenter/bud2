@@ -607,6 +607,17 @@ func main() {
 			},
 		},
 	)
+	// Set known MCP tool names so tool_grants wildcards (e.g. mcp__bud2__gk_*)
+	// can be expanded when loading agent definitions from plugins.
+	{
+		raw := mcpServer.ToolNames()
+		prefixed := make([]string, len(raw))
+		for i, name := range raw {
+			prefixed[i] = "mcp__bud2__" + name
+		}
+		exec.SetKnownMCPTools(prefixed)
+	}
+
 	if err := exec.Start(); err != nil {
 		log.Fatalf("Failed to start executive: %v", err)
 	}

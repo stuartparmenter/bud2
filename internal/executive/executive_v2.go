@@ -49,6 +49,10 @@ type ExecutiveV2 struct {
 	// MCP tool call tracking (for detecting user responses via MCP tools)
 	mcpToolCalled map[string]bool
 
+	// Known MCP tool names (with mcp__<server>__ prefix) used to expand
+	// wildcard patterns in plugins.yaml tool_grants. Set after tool registration.
+	knownMCPTools []string
+
 	// Core identity (loaded from state/core.md)
 	coreIdentity string
 
@@ -170,10 +174,17 @@ func NewExecutiveV2(
 	return exec
 }
 
+// SetKnownMCPTools sets the list of MCP tool names (with full mcp__<server>__
+// prefix) used to expand wildcard patterns in plugins.yaml tool_grants.
+// Call this after all MCP tools have been registered.
+func (e *ExecutiveV2) SetKnownMCPTools(tools []string) {
+	e.knownMCPTools = tools
+}
+
 // loadAgentDefs loads programmatic agent definitions fresh from plugins on each call,
 // so changes to state/system/plugins/ take effect without restarting Bud.
 func (e *ExecutiveV2) loadAgentDefs() map[string]claudecode.AgentDefinition {
-	defs, err := LoadAllAgents(e.session.statePath)
+	defs, err := LoadAllAgents(e.session.statePath, e.knownMCPTools)
 	if err != nil {
 		log.Printf("[executive-v2] Warning: failed to load agent definitions: %v", err)
 		return nil
