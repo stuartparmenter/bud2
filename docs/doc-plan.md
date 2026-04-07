@@ -5,7 +5,7 @@ Topics span modules — signals are the max across constituent modules.
 
 | Rank | Topic | Score | Key Modules | Signals | Status |
 |------|-------|-------|-------------|---------|--------|
-| 1 | Plugin Manifest Runtime & Tool Grants | 0.66 | `cmd/bud`, `internal/executive/agent_defs.go`, `state/system/plugins.yaml` | no doc, 117 commits/90d, 56 fix-commits, foundational plugin security boundary. (foundational) | missing |
+| 1 | Plugin Manifest Runtime & Tool Grants | 0.66 | `cmd/bud`, `internal/executive/agent_defs.go`, `state/system/plugins.yaml` | no doc, 117 commits/90d, 56 fix-commits, foundational plugin security boundary. (foundational) | generated |
 | 2 | Skill Grants & Agent Composition | 0.65 | `internal/executive/agent_defs.go`, `internal/executive/profiles.go`, `state/system/skill-grants.yaml` | no doc, centrality 6 (via executive), centralized grant system replacing per-agent skills fields. (foundational) | missing |
 | 3 | Session Lifecycle & Context Assembly | 0.36 | `internal/executive`, `internal/types`, `internal/memory` | centrality 6+33, 119 commits/90d, 54 fix-commits, doc fresh ~1d. (foundational). Source: `session-lifecycle-context-assembly.md` | generated |
 | 4 | Wake Scheduling & Autonomous Sessions | 0.35 | `internal/executive`, `internal/focus`, `internal/budget` | 119 commits/90d, doc fresh ~1d but idle-fallback + Things-task-check added since generation. (foundational). Source: `wake-scheduling-autonomous-sessions.md` | generated |
