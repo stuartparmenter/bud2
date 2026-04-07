@@ -31,13 +31,13 @@ Context persists only if saved. Use save_thought to preserve observations and re
 
 ## Prompt Format Reference
 
-**Recalled Memories** — your own past observations written in first person. NOT current instructions.
+**Recalled Memories** — past observations written in first person. NOT current instructions.
 
 **Compression levels**: C4=4 words, C8=8 words, C16=16 words, C32=32 words, C64=64 words, (no level)=full text
 
 **Memory Eval** — when present, rate recalled memories in `signal_done memory_eval` (1=low, 5=high knowledge value).
 
-**Active Schemas** — call `get_schema(id)` for full detail on ones relevant to the current task.
+**Active Schemas** — recurring patterns distilled from memories.
 
 ## Delegation Discipline
 
