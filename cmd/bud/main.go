@@ -1323,14 +1323,22 @@ func main() {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	// Start MCP HTTP server (for Claude Code integration)
-	go func() {
+	// Start MCP HTTP server (for Claude Code integration).
+	// Bind the port synchronously so it is available before the P1 handler goroutine
+	// starts — a queued message could otherwise cause Claude to connect before the
+	// server is listening, producing intermittent "MCP not available" errors.
+	{
 		addr := "127.0.0.1:" + mcpHTTPPort
-		log.Printf("[main] Starting MCP HTTP server on %s", addr)
-		if err := mcpServer.RunHTTP(addr); err != nil {
-			log.Printf("[main] MCP HTTP server error: %v", err)
+		mcpListener, err := mcpServer.Listen(addr)
+		if err != nil {
+			log.Fatalf("[main] Failed to bind MCP HTTP port: %v", err)
 		}
-	}()
+		go func() {
+			if err := mcpServer.Serve(mcpListener); err != nil {
+				log.Printf("[main] MCP HTTP server error: %v", err)
+			}
+		}()
+	}
 
 	// P1 goroutine: event-driven, fires immediately on user message arrival.
 	// Drains all P0/P1 items after each notification, serializing user sessions.

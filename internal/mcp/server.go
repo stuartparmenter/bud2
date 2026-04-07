@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -543,20 +544,38 @@ func (s *Server) sendResponse(resp *jsonRPCResponse) {
 	fmt.Fprintln(s.writer, string(data))
 }
 
-// RunHTTP starts the MCP server as an HTTP server (blocking).
-// Handles both /mcp (default domain "/") and /mcp/{token} (session domain).
-func (s *Server) RunHTTP(addr string) error {
+// Listen binds the TCP port and returns a net.Listener without starting to
+// accept requests. Call this synchronously before spawning the serve goroutine
+// so the port is reserved before any clients attempt to connect.
+func (s *Server) Listen(addr string) (net.Listener, error) {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("[mcp] HTTP server listening on %s", addr)
+	return ln, nil
+}
+
+// Serve starts accepting HTTP requests on an already-bound listener (blocking).
+func (s *Server) Serve(ln net.Listener) error {
 	mux := http.NewServeMux()
-	// Handle /mcp and /mcp/{token} with the same handler (token extracted from path)
 	mux.HandleFunc("/mcp", s.handleHTTP)
 	mux.HandleFunc("/mcp/", s.handleHTTP)
 	mux.HandleFunc("/", s.handleHTTP)
 	for path, handler := range s.extraHandlers {
 		mux.HandleFunc(path, handler)
 	}
+	return http.Serve(ln, mux)
+}
 
-	log.Printf("[mcp] HTTP server starting on %s", addr)
-	return http.ListenAndServe(addr, mux)
+// RunHTTP starts the MCP server as an HTTP server (blocking).
+// Handles both /mcp (default domain "/") and /mcp/{token} (session domain).
+func (s *Server) RunHTTP(addr string) error {
+	ln, err := s.Listen(addr)
+	if err != nil {
+		return err
+	}
+	return s.Serve(ln)
 }
 
 // extractToken parses the session token from the request path.
