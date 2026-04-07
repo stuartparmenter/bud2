@@ -1584,7 +1584,7 @@ func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 	// Only show NEW memories not already sent in this session
 	// Format with [xxxxx] engram prefix IDs for self-eval tracking
 	if len(bundle.Memories) > 0 || bundle.PriorMemoriesCount > 0 {
-		prompt.WriteString("## Recalled Memories (past context, use gk_read_observation for more details)\n")
+		prompt.WriteString("## Recalled Memories\n")
 
 		if len(bundle.Memories) > 0 {
 			// Sort by timestamp (chronological order, oldest first)
@@ -1606,7 +1606,7 @@ func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 
 	// Active schemas surfaced from recalled memories
 	if len(bundle.ActiveSchemas) > 0 {
-		prompt.WriteString("## Active Schemas (observed patterns, use get_schema for more details)\n")
+		prompt.WriteString("## Active Schemas\n")
 		for _, sc := range bundle.ActiveSchemas {
 			shortID := sc.ID
 			if len(shortID) > 8 {

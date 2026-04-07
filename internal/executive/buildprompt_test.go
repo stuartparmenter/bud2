@@ -471,7 +471,6 @@ func TestBuildPrompt_ActiveSchemas(t *testing.T) {
 
 	checks := []string{
 		"## Active Schemas",
-		"get_schema",
 		"[46b6c630] Memory System Debugging",
 		"validate via DB inspection",
 		"[39b431d7] System Infrastructure Optimization",
