@@ -65,6 +65,8 @@ type pluginManifestEntry struct {
 	localPath string
 	// Tool grants: pattern -> list of tools (may include wildcards like mcp__bud2__gk_*)
 	ToolGrants map[string][]string
+	// Exclude: sub-plugin directory names to skip (e.g. "issues-linear")
+	Exclude []string
 }
 
 // UnmarshalYAML handles both string ("owner/repo[:dir][@ref]") and
@@ -80,6 +82,7 @@ func (e *pluginManifestEntry) UnmarshalYAML(value *yaml.Node) error {
 		Ref        string              `yaml:"ref"`
 		Path       string              `yaml:"path"`
 		ToolGrants map[string][]string `yaml:"tool_grants"`
+		Exclude    []string            `yaml:"exclude"`
 	}
 	if err := value.Decode(&raw); err != nil {
 		return err
@@ -97,6 +100,7 @@ func (e *pluginManifestEntry) UnmarshalYAML(value *yaml.Node) error {
 	}
 	e.localPath = raw.Path
 	e.ToolGrants = raw.ToolGrants
+	e.Exclude = raw.Exclude
 	return nil
 }
 
@@ -305,7 +309,15 @@ func resolvedManifestPluginDirs(statePath string) []pluginDir {
 		if _, err := os.Stat(localPath); err != nil {
 			continue
 		}
+		excludeSet := make(map[string]bool, len(e.Exclude))
+		for _, ex := range e.Exclude {
+			excludeSet[ex] = true
+		}
 		for _, p := range resolvePluginPathsFromLocalPath(localPath) {
+			if excludeSet[filepath.Base(p)] {
+				log.Printf("[plugins] skipping excluded plugin: %s", filepath.Base(p))
+				continue
+			}
 			dirs = append(dirs, pluginDir{Path: p, ToolGrants: e.ToolGrants})
 		}
 	}
