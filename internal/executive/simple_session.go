@@ -1007,6 +1007,19 @@ func (s *SimpleSession) SendPrompt(ctx context.Context, prompt string, cfg Claud
 		err = sendWithOpts(baseOpts)
 	}
 
+	// Detect broken/cascading sessions: a resumed session that returns 0 turns with 0
+	// tokens (and the context wasn't cancelled) means the session is in a bad server-side
+	// state and will continue to cascade. Clear the session ID and retry fresh.
+	if err == nil && ctx.Err() == nil && s.isResuming &&
+		s.lastUsage != nil && s.lastUsage.NumTurns == 0 &&
+		s.lastUsage.InputTokens == 0 && s.lastUsage.OutputTokens == 0 {
+		log.Printf("[simple-session] WARNING: resumed session %s returned 0 turns/tokens, session may be corrupted — retrying fresh", s.claudeSessionID)
+		s.claudeSessionID = ""
+		s.isResuming = false
+		writeLog(logFile, "WARNING: 0-turn resume detected, retrying without --resume")
+		err = sendWithOpts(baseOpts)
+	}
+
 	if err != nil {
 		if ctx.Err() != nil {
 			log.Printf("[simple-session] Session %s interrupted (context cancelled)", s.sessionID)
