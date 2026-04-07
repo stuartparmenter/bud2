@@ -1489,6 +1489,21 @@ func (e *ExecutiveV2) buildRecentConversationForWake(itemID string) (string, err
 	return strings.Join(parts, "\n"), nil
 }
 
+// focusSectionHeader returns a descriptive markdown header for the current focus item,
+// replacing the generic "## Current Focus" + Type field with a self-describing header.
+func focusSectionHeader(item *focus.PendingItem) string {
+	switch {
+	case item.Source == "inbox" || item.Type == "message":
+		return "## Message"
+	case item.Type == "wake":
+		return "## Autonomous Wake"
+	case item.Content == "impulse:startup" || (strings.HasPrefix(item.Source, "impulse:") && item.Type == "unknown"):
+		return "## Startup"
+	default:
+		return "## Current Focus"
+	}
+}
+
 // buildPrompt constructs the prompt from a context bundle
 func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 	var prompt strings.Builder
@@ -1593,7 +1608,8 @@ func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 
 	// Current focus item
 	if bundle.CurrentFocus != nil {
-		prompt.WriteString("## Current Focus\n")
+		prompt.WriteString(focusSectionHeader(bundle.CurrentFocus))
+		prompt.WriteString("\n")
 		prompt.WriteString(bundle.CurrentFocus.Content)
 		prompt.WriteString("\n")
 

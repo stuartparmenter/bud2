@@ -262,30 +262,59 @@ func TestBuildPrompt_SuspendedTasks(t *testing.T) {
 	}
 }
 
-// TestBuildPrompt_CurrentFocusBasic verifies that the current focus item's
-// content appears bare under ## Current Focus with no Type/Priority/Source labels.
+// TestBuildPrompt_CurrentFocusBasic verifies section header mapping and bare content rendering.
 func TestBuildPrompt_CurrentFocusBasic(t *testing.T) {
-	exec := newTestExecutive(t)
-	bundle := &focus.ContextBundle{
-		CurrentFocus: &focus.PendingItem{
-			Type:     "user_input",
-			Priority: focus.P1UserInput,
-			Source:   "discord",
-			Content:  "can you help me with this?",
+	cases := []struct {
+		name           string
+		item           *focus.PendingItem
+		expectedHeader string
+	}{
+		{
+			name: "inbox message uses ## Message",
+			item: &focus.PendingItem{
+				Type: "message", Source: "inbox", Content: "can you help me with this?",
+			},
+			expectedHeader: "## Message",
+		},
+		{
+			name: "wake type uses ## Autonomous Wake",
+			item: &focus.PendingItem{
+				Type: "wake", Source: "impulse:system", Content: "Periodic autonomous wake-up.",
+			},
+			expectedHeader: "## Autonomous Wake",
+		},
+		{
+			name: "startup impulse uses ## Startup",
+			item: &focus.PendingItem{
+				Type: "unknown", Source: "impulse:system", Content: "impulse:startup",
+			},
+			expectedHeader: "## Startup",
+		},
+		{
+			name: "unknown type falls back to ## Current Focus",
+			item: &focus.PendingItem{
+				Type: "due", Source: "impulse:task", Content: "task reminder",
+			},
+			expectedHeader: "## Current Focus",
 		},
 	}
-	out := exec.buildPrompt(bundle)
 
-	if !strings.Contains(out, "## Current Focus") {
-		t.Errorf("expected ## Current Focus header, got:\n%s", out)
-	}
-	if !strings.Contains(out, "can you help me with this?") {
-		t.Errorf("expected bare content in output, got:\n%s", out)
-	}
-	for _, unwanted := range []string{"Type:", "Priority:", "Source:", "Content:"} {
-		if strings.Contains(out, unwanted) {
-			t.Errorf("expected %q to be absent from Current Focus output, got:\n%s", unwanted, out)
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			exec := newTestExecutive(t)
+			out := exec.buildPrompt(&focus.ContextBundle{CurrentFocus: tc.item})
+			if !strings.Contains(out, tc.expectedHeader) {
+				t.Errorf("expected header %q, got:\n%s", tc.expectedHeader, out)
+			}
+			if !strings.Contains(out, tc.item.Content) {
+				t.Errorf("expected bare content %q in output, got:\n%s", tc.item.Content, out)
+			}
+			for _, unwanted := range []string{"Type:", "Priority:", "Source:", "Content:"} {
+				if strings.Contains(out, unwanted) {
+					t.Errorf("expected %q absent, got:\n%s", unwanted, out)
+				}
+			}
+		})
 	}
 }
 
@@ -370,6 +399,7 @@ func TestBuildPrompt_WakeFocus(t *testing.T) {
 	out := exec.buildPrompt(bundle)
 
 	checks := []string{
+		"## Autonomous Wake",
 		"# Autonomous Wake",
 		"Check tasks and do background work.",
 		"## Conversation Log",
