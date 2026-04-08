@@ -264,7 +264,17 @@ func loadManifestPlugins(statePath string) []string {
 			continue
 		}
 
-		paths = append(paths, resolvePluginPathsFromLocalPath(localPath)...)
+		excludeSet := make(map[string]bool, len(e.Exclude))
+		for _, ex := range e.Exclude {
+			excludeSet[ex] = true
+		}
+		for _, p := range resolvePluginPathsFromLocalPath(localPath) {
+			if excludeSet[filepath.Base(p)] {
+				log.Printf("[plugins] skipping excluded plugin: %s", filepath.Base(p))
+				continue
+			}
+			paths = append(paths, p)
+		}
 	}
 	return paths
 }
