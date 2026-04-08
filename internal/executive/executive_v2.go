@@ -132,7 +132,7 @@ func NewExecutiveV2(
 	exec := &ExecutiveV2{
 		session:        sess,
 		attention:      focus.New(),
-		queue:          focus.NewQueue(statePath, 100),
+		queue:          focus.NewQueue(filepath.Join(statePath, "system"), 100),
 		memory:         memory,
 		reflexLog:      reflexLog,
 		subagents:      NewSubagentManager(statePath),
