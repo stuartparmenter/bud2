@@ -23,6 +23,7 @@ import (
 	"github.com/shirou/gopsutil/v3/process"
 	"github.com/vthunder/bud2/internal/activity"
 	"github.com/vthunder/bud2/internal/engram"
+	"github.com/vthunder/bud2/internal/paths"
 	"github.com/vthunder/bud2/internal/budget"
 	"github.com/vthunder/bud2/internal/effectors"
 	"github.com/vthunder/bud2/internal/embedding"
@@ -49,7 +50,7 @@ const Version = "2026-01-13-v2-focus-cutover"
 // checkPidFile checks for an existing bud process and handles it
 // Returns a cleanup function to remove the pid file on exit
 func checkPidFile(statePath string) func() {
-	pidFile := filepath.Join(statePath, "bud.pid")
+	pidFile := filepath.Join(statePath, "system", "bud.pid")
 
 	// Check if pid file exists
 	if data, err := os.ReadFile(pidFile); err == nil {
@@ -157,7 +158,7 @@ func main() {
 	}
 
 	// Check for existing bud process (before creating state directory)
-	os.MkdirAll(statePath, 0755) // Ensure state dir exists for pid file
+	os.MkdirAll(filepath.Join(statePath, "system"), 0755) // Ensure system/ dir exists for pid file
 	cleanupPidFile := checkPidFile(statePath)
 	defer cleanupPidFile()
 	autonomousEnabled := os.Getenv("AUTONOMOUS_ENABLED") == "true"
@@ -624,7 +625,7 @@ func main() {
 
 	// Open the single persistent executive log pane exactly once at startup.
 	// All wakes append to the same file; context clears do not open a new pane.
-	go tmuxwindow.EnsureExecWindow(filepath.Join(statePath, "logs", "exec", "executive.log"))
+	go tmuxwindow.EnsureExecWindow(filepath.Join(paths.LogDir(), "exec", "executive.log"))
 
 	// Close tmux windows older than 24h every 2 hours.
 	tmuxwindow.StartCleanupLoop(2*time.Hour, 24*time.Hour)

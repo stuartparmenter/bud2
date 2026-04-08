@@ -20,6 +20,7 @@ import (
 	"github.com/vthunder/bud2/internal/engram"
 	"github.com/vthunder/bud2/internal/focus"
 	"github.com/vthunder/bud2/internal/logging"
+	"github.com/vthunder/bud2/internal/paths"
 	"github.com/vthunder/bud2/internal/profiling"
 	"github.com/vthunder/bud2/internal/reflex"
 )
@@ -792,7 +793,7 @@ func (e *ExecutiveV2) processItem(ctx context.Context, items []*focus.PendingIte
 	// Single persistent log file: all wakes append to logs/exec/executive.log.
 	// Set this before PrepareXxx so WriteSessionLogEntry writes to the right path.
 	if e.config.WorkDir != "" {
-		execLogPath := filepath.Join(e.config.WorkDir, "logs", "exec", "executive.log")
+		execLogPath := filepath.Join(paths.LogDir(), "exec", "executive.log")
 		e.session.SetSessionLog(execLogPath)
 	}
 

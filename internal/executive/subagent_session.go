@@ -22,6 +22,7 @@ import (
 	"time"
 
 	claudecode "github.com/severity1/claude-agent-sdk-go"
+	"github.com/vthunder/bud2/internal/paths"
 )
 
 // SubagentEventKind categorizes a logged subagent event.
@@ -517,7 +518,7 @@ func (m *SubagentManager) runSession(ctx context.Context, session *SubagentSessi
 	// Open a session log file (same format as executive session logs).
 	var logFile *os.File
 	if cfg.WorkDir != "" {
-		logDir := filepath.Join(cfg.WorkDir, "logs", "agents")
+		logDir := filepath.Join(paths.LogDir(), "agents")
 		if err := os.MkdirAll(logDir, 0755); err == nil {
 			logPath := filepath.Join(logDir, "subagent-"+session.ID[:8]+".log")
 			if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); err == nil {
