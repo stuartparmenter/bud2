@@ -12,7 +12,7 @@ Topics span modules — signals are the max across constituent modules.
 | 5 | Skill Grants & Agent Composition | 0.34 | `internal/executive/agent_defs.go`, `internal/executive/profiles.go`, `state/system/skill-grants.yaml` | centrality 6 (via executive), doc fresh ~1d; centralized grant system. (foundational). Source: `skill-grants-agent-composition.md` | generated |
 | 6 | MCP Tool Dispatch & Registration | 0.34 | `internal/mcp`, `internal/types` | centrality 14+33, complexity max (5513 LoC, 9 files), doc fresh ~2d. Source: `mcp-tool-dispatch-registration.md` | generated |
 | 7 | Subagent Orchestration | 0.33 | `internal/executive`, `internal/types`, `internal/effectors` | centrality 6+33, 119 commits/90d, doc fresh ~2d. Source: `subagent-orchestration.md` | generated |
-| 8 | Seed Configuration & Plugin System | 0.32 | `cmd/bud`, `seed/` | 117 commits/90d, doc fresh ~1d; plugins.yaml runtime + exclude lists added since generation. Source: `seed-configuration-plugin-system.md` | stale |
+| 8 | Seed Configuration & Plugin System | 0.32 | `cmd/bud`, `seed/` | 117 commits/90d; plugins.yaml runtime, exclude lists, tool_grants, skill-grants.yaml, zettel-libraries covered. Source: `seed-configuration-plugin-system.md` | generated |
 | 9 | Reflex Evaluation Pipeline | 0.31 | `internal/reflex`, `internal/senses`, `internal/types` | centrality 9+33, 21 commits/90d, doc fresh ~2d. Source: `reflex-evaluation-pipeline.md` | generated |
 | 10 | Attention & Salience Computation | 0.30 | `internal/focus`, `internal/types` | centrality 6+33, 17 commits/90d, doc fresh ~2d. Source: `attention-salience-computation.md` | generated |
 | 11 | Token Budget & Session Caps | 0.29 | `internal/budget`, `internal/executive` | 12 commits/90d, doc fresh ~1d. Source: `token-budget-session-caps.md` | generated |
@@ -22,7 +22,7 @@ Topics span modules — signals are the max across constituent modules.
 
 ## Recommended next
 
-Run `dev:arch-doc "Seed Configuration & Plugin System"` on `bud2` — doc is stale (plugins.yaml runtime + exclude lists added since generation).
+All generated topics are current. Rank-1 ("Plugin Manifest Runtime & Tool Grants") now has a dedicated arch-doc via `seed-configuration-plugin-system.md` refresh (covers the same material). Run `dev:repo-doc bud2` when the overview is next due for a refresh.
 
 ---
-_Generated: 2026-04-08T05:45:00Z | Commit: dcd6fdfd_
+_Generated: 2026-04-08T05:45:00Z | Commit: dcd6fdfd | Last maintained: 2026-04-08T08:00:00Z | Commit: 9d88436_
