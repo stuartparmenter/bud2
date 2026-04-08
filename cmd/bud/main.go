@@ -676,6 +676,13 @@ func main() {
 					resolved := session.ResolveMemoryEval(memoryEval)
 					if len(resolved) > 0 {
 						evalData["resolved"] = resolved // trace_id -> rating
+
+						// Feed ratings back to engram to close the quality feedback loop
+						if engramClient != nil {
+							if err := engramClient.RateEngrams(resolved); err != nil {
+								log.Printf("[memory_eval] Failed to rate engrams: %v", err)
+							}
+						}
 					}
 				}
 				activityLog.Log(activity.Entry{

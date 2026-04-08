@@ -1121,8 +1121,8 @@ func (e *ExecutiveV2) buildContext(items []*focus.PendingItem) *focus.ContextBun
 	// For autonomous wakes, skip memory retrieval entirely - analysis shows 48% of wake
 	// memories rated 1/5, dragging precision down to 29.6%. Wakes use generic prompts
 	// that pull irrelevant memories. Better to skip than pollute context.
-	memoryLimit := 10
-	if item.Type == "wake" {
+	memoryLimit := 6
+	if item.Type == "wake" || item.Content == "impulse:startup" {
 		memoryLimit = 0
 	}
 

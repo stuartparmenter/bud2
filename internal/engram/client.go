@@ -565,6 +565,13 @@ func (c *Client) post(path string, body any, out any) error {
 	return nil
 }
 
+// RateEngrams feeds executive memory ratings back to engram.
+// ratings maps trace ID to raw rating 1–5.
+func (c *Client) RateEngrams(ratings map[string]int) error {
+	body := map[string]any{"ratings": ratings}
+	return c.post("/v1/engrams/rate", body, nil)
+}
+
 type apiError struct {
 	Error string `json:"error"`
 	Code  string `json:"code"`
