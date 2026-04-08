@@ -9,7 +9,7 @@ How to decide where to save information so it's actually findable later.
 | **Engram** | Passive ambient recall — surfaces relevant context without explicit query | Automatic injection; write via `save_thought` |
 | **Zettels** | Primary knowledge store — atomic, linked, human-browsable ideas and findings | Explicit: `zettel-search`, `zettel-new`, `zettel-convert` |
 | **GK** | Autopilot planning only — structured entity/relationship graph for planning cycles | Explicit: `gk_*` tools; default domain `/` |
-| **Notes/Guides** | Long-form reference docs that don't fit zettel format | Read/Edit directly |
+| **Notes/Guides** | Documents that must be read as a whole — multi-step guides, blog drafts, active plans, sprint workflows | Read/Edit directly |
 | **Things** | Task queue only — not for knowledge | `gtd_*` / Things MCP |
 
 **Engram is for passive influence, not reliable recall.** Don't use it to store facts you'll need to look up — retrieval is probabilistic and rated ~2/5 quality. Use zettels for that.
@@ -33,8 +33,14 @@ How to decide where to save information so it's actually findable later.
 **Discovering a surprising gotcha or system quirk (not guide-worthy yet)?**
 → Append to `state/notes/learnings.md` with date and context. Review periodically to promote into guides or code fixes.
 
+**Writing something that must stay coherent as a whole (multi-step guide, blog draft, active plan)?**
+→ `state/notes/` or `state/projects/<project>/`. Notes are for documents, not atoms.
+
 **Writing longer research or design context to atomize later?**
 → Write to `state/notes/` first, then run `zettel-convert` before the session ends. Don't let source notes age unconverted.
+
+**Deciding between zettel and note for an operational reference?**
+→ If it's one focused concept and gains value from being linked to other ideas → zettel. If it only makes sense read start-to-finish → note. Zettels can describe current implementation; bitrot is a maintenance concern, not a categorization reason to avoid them.
 
 **Something that must be recalled at the start of every session without retrieval?**
 → **Ask the owner first.** If approved, add to `seed/core.md` AND `state/system/core.md`. Deploy after. High bar — core.md is the always-loaded system prompt.
