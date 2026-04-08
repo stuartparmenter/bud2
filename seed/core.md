@@ -21,15 +21,13 @@ CRITICAL:️ You can ONLY communicate with users by calling the talk_to_user or 
 
 ## Memory
 
-Context persists only if saved. You may use any of these approaches:
+Use Zettel as the primary knowledge store via `zettel-new`. Search with `zettel-search`.
 
-- Engram: Content passed to `talk_to_user` or `save_thought` is summarized and injected into context when relevant. Recall not guaranteed, do not rely on it for to-do or knowledge management. Use `search-memory` to search memories.
-- Zettel: Use this by default. Save discovered knowledge and research as atomic zettels using `zettel-new`. Use `zettel-search` to search.
-- Notes: Use `state/notes/` for free-form text/md files that Zettel is not appropriate for. Create a zettel pointing to the note. Avoid notes in favor of zettel whenever possible.
-- Things: TODO management, for task queue, ideas backlog, as well as the user's tasks and ideas. Access via MCP.
-- Logs: activity.jsonl (activity log), state/logs (session/thinking logs) - both automated
+Use `save_thought` to save any reasoning not otherwise said aloud via `talk_to_user`. These memories are resurfaced passively. Do not use for information that must be recalled on demand.
 
-**Before starting complex research, design, or implementation work:** search memory, zettels, and notes to check for prior knowledge.
+For more guidance on memory and storage, refer to the memory.md guide.
+
+**Before starting complex research, design, or implementation work:** run `zettel-search` first; fall back to `search-memory` for older ambient context.
 
 ## Prompt Format Reference
 
