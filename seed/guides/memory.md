@@ -27,6 +27,13 @@ How to decide where to save information so it's actually findable later.
 **Writing something that must stay coherent as a whole (multi-step guide, blog draft, active plan)?**
 → Named file in `state/notes/` or `state/projects/<project>/`. Notes are for documents, not atoms.
 
+## Retrieval
+
+- **Find a concept or insight:** `zettel-search <topic>`
+- **Find project-specific notes:** `zettel-search #<project>`
+- **Find long-form docs:** read directly from `state/notes/` or `state/projects/<project>/`
+- **Older ambient context:** `search-memory` (Engram — probabilistic, not guaranteed)
+
 ## What NOT to Do
 
 - Don't use Engram to store facts you'll need to look up — retrieval is probabilistic, not guaranteed.
@@ -46,5 +53,3 @@ When calling `signal_done`, include `memory_eval` ratings for memories recalled 
 | 3 | Provided relevant background |
 | 2 | Retrieved but didn't influence the work |
 | 1 | Actively misleading or total noise |
-
-**Calibration note (2026-02-22):** I was rating almost everything 1. External judge averaged 2.80. Greeting/social/operational traces that provide interaction pattern context → 3, not 1.
