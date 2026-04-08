@@ -2,27 +2,52 @@
 
 How to decide where to save information so it's actually findable later.
 
+## Storage Systems
+
+| System | Role | Access |
+|--------|------|--------|
+| **Engram** | Passive ambient recall — surfaces relevant context without explicit query | Automatic injection; write via `save_thought` |
+| **Zettels** | Primary knowledge store — atomic, linked, human-browsable ideas and findings | Explicit: `zettel-search`, `zettel-new`, `zettel-convert` |
+| **GK** | Autopilot planning only — structured entity/relationship graph for planning cycles | Explicit: `gk_*` tools; default domain `/` |
+| **Notes/Guides** | Long-form reference docs that don't fit zettel format | Read/Edit directly |
+| **Things** | Task queue only — not for knowledge | `gtd_*` / Things MCP |
+
+**Engram is for passive influence, not reliable recall.** Don't use it to store facts you'll need to look up — retrieval is probabilistic and rated ~2/5 quality. Use zettels for that.
+
+**GK is scoped to autopilot.** Don't use it for general knowledge storage. The relationship graph model fits planning data (epics → tasks, strategies → bets) but adds unnecessary overhead for everything else. Future: vector search on zettels will close the remaining gap.
+
 ## Decision Tree
 
-**Saving a passing observation or reasoning trace?**
-→ `save_thought` tool — gets ingested into Engram and consolidated over time.
+**Saving a passing observation, reasoning trace, or behavioral note?**
+→ `save_thought` → Engram. Good for things you want to *influence future context* without explicit retrieval.
+
+**Discovered a concept, insight, pattern, or research finding worth preserving?**
+→ `zettel-new` — creates an atomic note in `state/zettels/`. Run `zettel-search` first to avoid duplicates. This is the **default for new knowledge**.
 
 **Learning something specific about a project (gotcha, decision, design context)?**
-→ Write it to `state/projects/<project>/notes.md`. This is the canonical scratchpad for per-project context.
+→ Write to `state/projects/<project>/notes.md`. Canonical scratchpad for per-project context.
 
 **Discovering a general process, workflow, or convention that applies across projects?**
-→ Find the relevant guide in `state/system/guides/` (or `seed/guides/` for seeded content) and update it. If no guide fits, ask the owner whether a new guide is warranted.
+→ Update the relevant guide in `state/system/guides/`. If none fits, ask the owner whether a new guide is warranted.
 
-**Discovering a surprising gotcha or system quirk (not a full guide-worthy pattern yet)?**
+**Discovering a surprising gotcha or system quirk (not guide-worthy yet)?**
 → Append to `state/notes/learnings.md` with date and context. Review periodically to promote into guides or code fixes.
 
-**Something that must be recalled at the start of every session without any retrieval?**
-→ **Ask the owner first.** If approved, add to `seed/core.md` AND `state/system/core.md`. Deploy after. This is a high bar — core.md is the always-loaded system prompt; cluttering it degrades focus.
+**Writing longer research or design context to atomize later?**
+→ Write to `state/notes/` first, then run `zettel-convert` before the session ends. Don't let source notes age unconverted.
+
+**Something that must be recalled at the start of every session without retrieval?**
+→ **Ask the owner first.** If approved, add to `seed/core.md` AND `state/system/core.md`. Deploy after. High bar — core.md is the always-loaded system prompt.
+
+**Working in an autopilot planning cycle?**
+→ Use `gk_*` tools with the appropriate domain. See `autopilot.md` for the full planning flow.
 
 ## What NOT to Do
 
-- Don't add facts to `MEMORY.md`. That file is a Claude Code artifact — it doesn't integrate with Engram or Bud's state system. Use the paths above instead.
-- Don't write ephemeral task details to any persistent file. Use the task queue (Things Bud area) for in-progress work.
+- Don't use Engram to store facts you'll need to look up — retrieval is probabilistic, not guaranteed.
+- Don't use GK for general knowledge. It's for autopilot planning data only.
+- Don't add facts to `MEMORY.md`. That file is a Claude Code artifact — it doesn't integrate with Bud's state system.
+- Don't write ephemeral task details to any persistent file. Use Things for in-progress work.
 - Don't duplicate content across multiple locations. Pick one canonical home.
 
 ## Memory Self-Eval (signal_done)
