@@ -814,12 +814,12 @@ func registerStateTools(server *mcp.Server, deps *Dependencies) {
 			reason = "Redeploy requested"
 		}
 
-		// Find deploy script relative to state path
-		budDir := filepath.Dir(deps.StatePath)
-		if budDir == "." {
-			budDir = "."
+		// Find deploy script in bud2 source directory
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("cannot determine home dir: %w", err)
 		}
-		deployScript := filepath.Join(budDir, "deploy", "deploy.sh")
+		deployScript := filepath.Join(home, "src", "bud2", "deploy", "deploy.sh")
 		if _, err := os.Stat(deployScript); os.IsNotExist(err) {
 			return "", fmt.Errorf("deploy script not found: %s", deployScript)
 		}
