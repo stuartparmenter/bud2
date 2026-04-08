@@ -1,12 +1,12 @@
 ---
-generated_at: 2026-04-07T13:11:02Z
-commit: 12cd10a5
+generated_at: 2026-04-08T05:45:00Z
+commit: dcd6fdfd
 repomix: available
 ---
 
 # bud2 — Overview
 
-> Generated: 2026-04-07 | Commit: 12cd10a5
+> Generated: 2026-04-08 | Commit: dcd6fdfd
 
 ## Purpose
 
@@ -22,9 +22,10 @@ For items that pass through reflexes, `ExecutiveV2` (`internal/executive/executi
 
 | Path | Responsibility |
 |------|---------------|
-| `cmd/bud/main.go` | Daemon entry point — wires all subsystems, handles config, launchd lifecycle, plugin manifest loading |
+| `cmd/bud/main.go` | Daemon entry point — wires all subsystems, handles config, launchd lifecycle, plugin manifest loading, zettel-libraries generation |
 | `internal/executive/executive_v2.go` | Core orchestrator — runs Claude sessions, manages signal_done, subagents, per-prompt agent/skill reload |
-| `internal/executive/agent_defs.go` | Agent definition loading from plugins; applies tool grants from plugins.yaml |
+| `internal/executive/agent_defs.go` | Agent definition loading from plugins; applies tool grants and exclude lists from plugins.yaml |
+| `internal/executive/simple_session.go` | Plugin manifest parsing, local-path support, exclude list filtering, zettel-libraries generation |
 | `internal/focus/` | Attention system — salience computation, priority queue, focus/suspend/resume |
 | `internal/senses/` | Input adapters — Discord and calendar event ingestion → percepts |
 | `internal/effectors/` | Output adapters — Discord message sending and reactions |
@@ -37,26 +38,26 @@ For items that pass through reflexes, `ExecutiveV2` (`internal/executive/executi
 | `internal/budget/` | Token/thinking-time budget tracking across sessions |
 | `internal/gtd/` | Local GTD task store (JSON-backed; Things 3 integration via things-mcp MCP server) |
 | `seed/` | Core bundled plugins (`bud`, `bud-ops`), guides, reflexes, wakeup instructions |
-| `state/system/plugins.yaml` | External plugin manifest — lists GitHub repos to clone and load at startup |
+| `state/system/plugins.yaml` | External plugin manifest — lists repos/local paths to load; supports tool_grants and exclude lists |
 | `state/system/skill-grants.yaml` | Centralized agent→skill grants — controls which skills each agent type can invoke |
 
 ## Key Files
 
-- `cmd/bud/main.go` — wires all subsystems together; start here to understand initialization order
+- `cmd/bud/main.go` — wires all subsystems together; start here to understand initialization order and config (statePath defaults to `~/Documents/bud-state`)
 - `internal/executive/executive_v2.go` — `ExecutiveV2` struct: session lifecycle, context assembly, subagent management
-- `internal/executive/agent_defs.go` — plugin-aware agent definition loading; applies `tool_grants` from plugins.yaml
+- `internal/executive/simple_session.go` — plugin manifest parsing; handles `path:` (local), `exclude:`, `tool_grants`, and zettel-libraries generation
+- `internal/executive/agent_defs.go` — plugin-aware agent definition loading; applies tool grants from plugins.yaml
 - `internal/focus/attention.go` — salience computation and focus selection logic
 - `internal/mcp/tools/register.go` — all MCP tool definitions; largest file, entry point for any tool work
 - `internal/reflex/engine.go` — YAML reflex loading, evaluation, and action dispatch
-- `state/system/plugins.yaml` — declares external plugins (GitHub repos) loaded at startup with optional tool_grants
-- `state/system/skill-grants.yaml` — centralized skill grant rules for all agent profiles (replaces per-agent `skills:` fields)
+- `state/system/plugins.yaml` — declares external plugins (GitHub repos or local paths) loaded at startup; supports `exclude:` sub-plugin list
 
 ## Conventions
 
 - **Testing**: Co-located `*_test.go` files. Go standard testing; run with `go test ./...`. Integration tests in `tests/scenarios/` (YAML-defined). See `docs/testing-playbook.md`.
 - **Naming**: Go idioms throughout. Internal packages under `internal/`. Tool names in MCP use snake_case (e.g. `talk_to_user`, `signal_done`).
 - **Entry points**: Single binary `bin/bud` built by `scripts/build.sh`. State server `bin/bud-state` is a separate MCP-only binary. `things-mcp` is a TypeScript server built separately.
-- **Patterns to know**: Core plugins (`bud`, `bud-ops`) live in `seed/plugins/` and are always bundled. External plugins (useful-plugins, autopilot, etc.) are declared in `state/system/plugins.yaml` — Bud clones/updates them at startup from GitHub into a local cache. `seed/` files are copied to `state/system/` on first run; edits to `seed/` don't take effect until redeployment or manual copy. Agent definitions and skills hot-reload from plugins on every prompt without restart. The `state/` directory is Bud's working directory and is a separate git repo (`bud2/state`).
+- **Patterns to know**: Core plugins (`bud`, `bud-ops`) live in `seed/plugins/` and are always bundled. External plugins are declared in `state/system/plugins.yaml` — Bud clones/updates GitHub repos at startup into a local cache (auto-readonly), or loads from a `path:` local checkout. The `exclude:` list on a manifest entry skips named sub-plugin directories. At startup, `generateZettelLibraries` scans all plugin manifests for `"zettels"` declarations and writes `state/system/zettel-libraries.yaml`; cache clones are always marked readonly. Agent definitions and skills hot-reload from plugins on every prompt without restart. The `state/` directory is Bud's working directory (`~/Documents/bud-state`) and is a separate git repo. Profiling is disabled by default — enable via `BUD_PROFILE=minimal|detailed|trace`. Periodic state-sync to git has been removed (was causing git bloat with large files).
 
 ## Start Here
 
@@ -64,8 +65,8 @@ For a given task type, start at:
 - **Adding a new MCP tool**: `internal/mcp/tools/register.go` — all tools are registered here; follow the pattern of an existing tool
 - **Modifying reflex behavior**: `seed/reflexes/*.yaml` — YAML rules evaluated by `internal/reflex/engine.go`; hot-reload on change
 - **Changing how Claude is prompted**: `internal/executive/executive_v2.go` around `buildPrompt` — context assembly is here; also check `seed/core.md` and `seed/wakeup.md`
-- **Adding/configuring a plugin**: `state/system/plugins.yaml` — add a GitHub repo entry; use `tool_grants` to control which MCP tools the plugin's agents can call
+- **Adding/configuring a plugin**: `state/system/plugins.yaml` — add a GitHub repo (`owner/repo`) or local `path:` entry; use `tool_grants` to control which MCP tools the plugin's agents can call, `exclude:` to skip specific sub-plugin directories
 - **Changing agent skill access**: `state/system/skill-grants.yaml` — centralized grants file; agent profiles matched by `"namespace:agent"` glob patterns
 - **Adding a new sense/integration**: `internal/senses/` — create a new file following the Discord pattern, wire in `cmd/bud/main.go`
 - **Understanding memory retrieval**: `internal/engram/client.go` (HTTP client) + Engram service repo for the storage side
-- **Running locally**: `./scripts/build.sh` then `launchctl kickstart -k gui/501/com.bud.daemon`; logs at `~/Library/Logs/bud.log`
+- **Running locally**: `./scripts/build.sh` then `launchctl kickstart -k gui/501/com.bud.daemon`; logs at `~/Library/Logs/bud.log`; state at `~/Documents/bud-state`
