@@ -1,15 +1,23 @@
 #!/bin/bash
-# Deploy script for bud on Mac Mini
+# Deploy script for bud
 # Usage: ./deploy.sh [--no-restart]
 
 set -e
 
-# Ensure Homebrew paths are available (Apple Silicon + Intel)
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-
 BUD_DIR="${BUD_DIR:-@BUD_DIR@}"
-LOG_FILE="${BUD_LOG:-@HOME@/Library/Logs/bud-deploy.log}"
+OS="$(uname -s)"
 
+case "$OS" in
+    Darwin)
+        export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+        LOG_FILE="${BUD_LOG:-@HOME@/Library/Logs/bud-deploy.log}"
+        ;;
+    *)
+        LOG_FILE="${BUD_LOG:-${XDG_STATE_HOME:-@HOME@/.local/state}/bud/bud-deploy.log}"
+        ;;
+esac
+
+mkdir -p "$(dirname "$LOG_FILE")"
 cd "$BUD_DIR"
 
 echo "$(date): Starting deploy..." >> "$LOG_FILE"
@@ -20,18 +28,24 @@ git pull origin main >> "$LOG_FILE" 2>&1
 
 # Build
 echo "Building bud..."
-go build -o bin/bud ./cmd/bud >> "$LOG_FILE" 2>&1
-go build -o bin/bud-mcp ./cmd/bud-mcp >> "$LOG_FILE" 2>&1
+"$BUD_DIR/scripts/build.sh" >> "$LOG_FILE" 2>&1
 
 echo "$(date): Build complete" >> "$LOG_FILE"
 
 # Restart unless --no-restart flag
 if [[ "$1" != "--no-restart" ]]; then
     echo "Restarting bud service..."
-    launchctl kickstart -k gui/$(id -u)/com.bud.daemon 2>/dev/null || \
-        launchctl stop com.bud.daemon 2>/dev/null || true
-    sleep 1
-    launchctl start com.bud.daemon 2>/dev/null || true
+    case "$OS" in
+        Darwin)
+            launchctl kickstart -k gui/$(id -u)/com.bud.daemon 2>/dev/null || \
+                launchctl stop com.bud.daemon 2>/dev/null || true
+            sleep 1
+            launchctl start com.bud.daemon 2>/dev/null || true
+            ;;
+        *)
+            systemctl --user restart bud.service 2>/dev/null || true
+            ;;
+    esac
     echo "$(date): Service restarted" >> "$LOG_FILE"
 fi
 

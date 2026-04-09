@@ -23,13 +23,23 @@ tail -f ~/Library/Logs/bud.log
 
 ### Common Tasks
 
+**macOS (launchd):**
+
 | What | Command |
 |------|---------|
 | Build everything | `./scripts/build.sh` |
-| Restart daemon | `launchctl kickstart -k gui/501/com.bud.daemon` |
-| Check daemon status | `launchctl list | grep bud` |
+| Restart daemon | `launchctl kickstart -k gui/$(id -u)/com.bud.daemon` |
+| Check daemon status | `launchctl list \| grep bud` |
 | View logs | `tail -f ~/Library/Logs/bud.log` |
-| Test state server | `curl http://localhost:3100/health` |
+
+**Linux (systemd):**
+
+| What | Command |
+|------|---------|
+| Build everything | `./scripts/build.sh` |
+| Restart daemon | `systemctl --user restart bud.service` |
+| Check daemon status | `systemctl --user status bud.service` |
+| View logs | `journalctl --user -u bud -f` |
 
 ### Project Structure
 
@@ -50,17 +60,19 @@ bud2/
 
 ### Configuration
 
-- **Launchd plist:** `~/Library/LaunchAgents/com.bud.daemon.plist`
 - **Entrypoint script:** `deploy/run-bud.sh`
 - **State directory:** `state/` (working directory for Bud)
-- **Logs:** `~/Library/Logs/bud.log`
+- **macOS service:** `~/Library/LaunchAgents/com.bud.daemon.plist`
+- **macOS logs:** `~/Library/Logs/bud.log`
+- **Linux service:** `~/.config/systemd/user/bud.service`
+- **Linux logs:** `~/.local/state/bud/bud.log`
 
 ## Development Workflow
 
 1. **Make changes** to daemon code
 2. **Build:** `./scripts/build.sh`
-3. **Restart:** `launchctl kickstart -k gui/501/com.bud.daemon`
-4. **Verify:** `tail -f ~/Library/Logs/bud.log`
+3. **Restart:** `launchctl kickstart -k gui/$(id -u)/com.bud.daemon` (macOS) or `systemctl --user restart bud.service` (Linux)
+4. **Verify:** Check logs (see Common Tasks above)
 
 ## Documentation
 
@@ -79,9 +91,8 @@ Detailed guides are in `state/system/guides/`:
 
 ## Architecture
 
-Bud runs as a macOS launchd service:
+Bud runs as a system service (launchd on macOS, systemd on Linux):
 - **Daemon** (`bin/bud`) runs continuously, managing memory and autonomous work
-- **State server** (`bin/bud-state`) provides MCP tools for memory/state access
 - **Background jobs** (consolidation, compression) run periodically
 - **Claude Code integration** via MCP protocol
 

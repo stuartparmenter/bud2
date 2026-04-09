@@ -1,0 +1,13 @@
+[Unit]
+Description=Bud Personal AI Agent
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=@BUD_DIR@
+ExecStart=@BUD_DIR@/deploy/run-bud.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
