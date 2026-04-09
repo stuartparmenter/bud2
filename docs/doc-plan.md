@@ -1,28 +1,26 @@
-# Doc Plan: bud2 — 2026-04-08
+# Doc Plan: bud2 — 2026-04-09
 
 Scoring: centrality (0.30) + coverage gap (0.30) + complexity (0.20) + churn (0.10) + bug density (0.10)
 Topics span modules — signals are the max across constituent modules.
 
 | Rank | Topic | Score | Key Modules | Signals | Status |
 |------|-------|-------|-------------|---------|--------|
-| 1 | Plugin Manifest Runtime & Tool Grants | 0.54 | `cmd/bud`, `internal/executive/simple_session.go`, `state/system/plugins.yaml` | no doc covering exclude + zettel-libraries additions (7 commits behind), 117 commits/90d, 56 fix-commits, foundational plugin security boundary. (foundational) | generated |
-| 2 | Zettel Library Discovery & Generation | 0.48 | `internal/executive/simple_session.go`, `cmd/bud/main.go` | no doc, generated at startup from plugin manifests; cache-readonly semantics; 117 commits/90d. (foundational) | generated |
-| 3 | Session Lifecycle & Context Assembly | 0.36 | `internal/executive`, `internal/types`, `internal/memory` | centrality 6+33, 119 commits/90d, 54 fix-commits, doc fresh ~2d. (foundational). Source: `session-lifecycle-context-assembly.md` | generated |
-| 4 | Wake Scheduling & Autonomous Sessions | 0.35 | `internal/executive`, `internal/focus`, `internal/budget` | 119 commits/90d, doc fresh ~2d; idle-fallback + Things-task-check covered. (foundational). Source: `wake-scheduling-autonomous-sessions.md` | generated |
-| 5 | Skill Grants & Agent Composition | 0.34 | `internal/executive/agent_defs.go`, `internal/executive/profiles.go`, `state/system/skill-grants.yaml` | centrality 6 (via executive), doc fresh ~1d; centralized grant system. (foundational). Source: `skill-grants-agent-composition.md` | generated |
-| 6 | MCP Tool Dispatch & Registration | 0.34 | `internal/mcp`, `internal/types` | centrality 14+33, complexity max (5513 LoC, 9 files), doc fresh ~2d. Source: `mcp-tool-dispatch-registration.md` | generated |
-| 7 | Subagent Orchestration | 0.33 | `internal/executive`, `internal/types`, `internal/effectors` | centrality 6+33, 119 commits/90d, doc fresh ~2d. Source: `subagent-orchestration.md` | generated |
-| 8 | Seed Configuration & Plugin System | 0.32 | `cmd/bud`, `seed/` | 117 commits/90d; plugins.yaml runtime, exclude lists, tool_grants, skill-grants.yaml, zettel-libraries covered. Source: `seed-configuration-plugin-system.md` | generated |
-| 9 | Reflex Evaluation Pipeline | 0.31 | `internal/reflex`, `internal/senses`, `internal/types` | centrality 9+33, 21 commits/90d, doc fresh ~2d. Source: `reflex-evaluation-pipeline.md` | generated |
-| 10 | Attention & Salience Computation | 0.30 | `internal/focus`, `internal/types` | centrality 6+33, 17 commits/90d, doc fresh ~2d. Source: `attention-salience-computation.md` | generated |
-| 11 | Token Budget & Session Caps | 0.29 | `internal/budget`, `internal/executive` | 12 commits/90d, doc fresh ~1d. Source: `token-budget-session-caps.md` | generated |
-| 12 | Percept Ingestion & Senses | 0.28 | `internal/senses`, `internal/memory`, `internal/types` | centrality 2+33, 19 commits/90d, doc fresh ~2d. Source: `percept-ingestion-senses.md` | generated |
-| 13 | Memory Consolidation Pipeline | 0.27 | `internal/engram`, `internal/memory`, `internal/embedding`, `internal/eval` | centrality 8, 22 commits/90d, doc fresh ~1d. Source: `memory-consolidation-pipeline.md` | generated |
-| 14 | GTD & Task Integration | 0.26 | `internal/gtd`, `things-mcp/` | centrality 14, low churn, doc fresh ~1d. Source: `gtd-task-integration.md` | generated |
+| 1 | Memory Quality Feedback Loop | 0.87 | `internal/executive`, `internal/engram` | centrality 8 (engram), no doc, 123 commits/90d, 57 fix-commits; RateEngrams() after signal_done is new. (foundational) | missing |
+| 2 | Startup Lifecycle & Context Injection | 0.85 | `cmd/bud`, `internal/executive`, `seed/startup-instructions.md` | no doc, 108 commits/90d, 49 fix-commits; startup now injects structured instructions, memory retrieval disabled. (foundational) | missing |
+| 3 | Session Lifecycle & Context Assembly | 0.80 | `internal/executive`, `internal/types` | centrality 33 (types), 123 commits/90d, 57 fix-commits; memory limit changed 10→6, startup path added. (foundational). Source: `session-lifecycle-context-assembly.md` | generated |
+| 4 | Subagent Orchestration | 0.80 | `internal/executive`, `internal/types`, `internal/effectors` | centrality 33, 123 commits/90d, 57 fix-commits; startup subagent restart-notes pattern added. (foundational). Source: `subagent-orchestration.md` | generated |
+| 5 | MCP Tool Dispatch & Registration | 0.58 | `internal/mcp`, `internal/types` | centrality 33 (via types), complexity max (5520 LoC, 9 files), 61 commits/90d. Source: `mcp-tool-dispatch-registration.md` | generated |
+| 6 | Plugin Manifest Runtime & Tool Grants | 0.55 | `cmd/bud`, `internal/executive`, `state/system/plugins.yaml` | 108 commits/90d, 49 fix-commits; exclude list fix changes MCP server suppression. (foundational). Source: `plugin-manifest-runtime-tool-grants.md` | generated |
+| 7 | Wake Scheduling & Autonomous Sessions | 0.55 | `internal/executive`, `internal/focus`, `internal/budget` | 123 commits/90d, 57 fix-commits; idle-fallback and startup handling updated. (foundational). Source: `wake-scheduling-autonomous-sessions.md` | generated |
+| 8 | Zettel Library Discovery & Generation | 0.45 | `internal/executive/simple_session.go`, `cmd/bud` | 108 commits/90d; merge semantics changed (manual entries now preserved). Source: `zettel-library-discovery-generation.md` | generated |
+| 9 | Token Budget & Session Caps | 0.45 | `internal/budget`, `internal/executive` | centrality 6, complexity max (5884 LoC), 123 commits/90d. Source: `token-budget-session-caps.md` | generated |
+| 10 | Skill Grants & Agent Composition | 0.45 | `internal/executive/agent_defs.go`, `internal/executive/profiles.go`, `state/system/skill-grants.yaml` | centrality 6 (via executive), 123 commits/90d; exclude-list applied during manifest load. Source: `skill-grants-agent-composition.md` | generated |
+| 11 | Reflex Evaluation Pipeline | 0.44 | `internal/reflex`, `internal/senses`, `internal/types` | centrality 33, 3049 LoC, 21 commits/90d. Source: `reflex-evaluation-pipeline.md` | generated |
+| 12 | Attention & Salience Computation | 0.37 | `internal/focus`, `internal/types` | centrality 33 (via types), 17 commits/90d. Source: `attention-salience-computation.md` | generated |
 
 ## Recommended next
 
-All generated topics are current. Rank-1 ("Plugin Manifest Runtime & Tool Grants") now has a dedicated arch-doc via `seed-configuration-plugin-system.md` refresh (covers the same material). Run `dev:repo-doc bud2` when the overview is next due for a refresh.
+Run `dev:arch-doc "Memory Quality Feedback Loop"` on `bud2` — the `RateEngrams()` quality feedback loop added in commit 4444485 is a new architectural mechanism with no existing doc; it closes the loop between session evaluation and long-term memory quality.
 
 ---
-_Generated: 2026-04-08T05:45:00Z | Commit: dcd6fdfd | Last maintained: 2026-04-08T08:00:00Z | Commit: 9d88436_
+_Generated: 2026-04-09T01:45:00Z | Commit: e790de89_
