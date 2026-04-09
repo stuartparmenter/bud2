@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # Go modules
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    # Wait 7 days after a new release before opening a version-update PR.
+    # Security updates bypass cooldown automatically.
+    cooldown:
+      default-days: 7
+    groups:
+      go-deps:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor
