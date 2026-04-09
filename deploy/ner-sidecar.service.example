@@ -1,0 +1,13 @@
+[Unit]
+Description=Bud NER Sidecar (spaCy)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=@BUD_DIR@/sidecar
+ExecStart=@BUD_DIR@/sidecar/run.sh --port 8099
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

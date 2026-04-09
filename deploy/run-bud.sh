@@ -5,7 +5,12 @@
 # Ensure TERM is set for tmux compatibility
 export TERM="${TERM:-xterm-256color}"
 
-LOG_FILE="${HOME}/Library/Logs/bud.log"
+# OS-aware log path
+case "$(uname -s)" in
+    Darwin) LOG_FILE="${HOME}/Library/Logs/bud.log" ;;
+    *)      LOG_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/bud/bud.log" ;;
+esac
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUD_DIR="$(dirname "$SCRIPT_DIR")"
 
@@ -21,6 +26,7 @@ if [ -f "$BUD_DIR/.env" ]; then
     set +a
 fi
 
+mkdir -p "$(dirname "$LOG_FILE")"
 echo "$(date): === Starting bud ===" >> "$LOG_FILE"
 
 # Run bud, capturing both stdout and stderr to log file

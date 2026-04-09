@@ -1,6 +1,6 @@
 #!/bin/bash
 # Setup script for bud deployment
-# Generates deploy scripts and launchd plists with correct paths
+# Generates deploy scripts and service configs with correct paths
 
 set -e
 
@@ -8,19 +8,24 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUD_DIR="${BUD_DIR:-$(dirname "$SCRIPT_DIR")}"
 USERNAME="$(whoami)"
+OS="$(uname -s)"
 
 echo "Setting up bud deployment..."
 echo "  BUD_DIR: $BUD_DIR"
 echo "  USER: $USERNAME"
+echo "  OS: $OS"
 echo ""
 
 # Check prerequisites
 check_prereqs() {
     local missing=()
-    command -v go >/dev/null || missing+=("go (brew install go)")
-    command -v fswatch >/dev/null || missing+=("fswatch (brew install fswatch)")
+    command -v go >/dev/null || {
+        case "$OS" in
+            Darwin) missing+=("go (brew install go)") ;;
+            *)      missing+=("go (apt install golang-go / pacman -S go)") ;;
+        esac
+    }
     command -v claude >/dev/null || missing+=("claude (npm install -g @anthropic-ai/claude-code)")
-    command -v python3.12 >/dev/null || missing+=("python@3.12 (brew install python@3.12) - for NER sidecar")
 
     if [ ${#missing[@]} -gt 0 ]; then
         echo "Missing prerequisites:"
@@ -42,53 +47,86 @@ generate_deploy() {
     chmod +x "$SCRIPT_DIR/deploy.sh"
 }
 
-# Generate plist files from examples
-generate_plists() {
-    echo "Generating launchd plist files..."
-
-    for plist in com.bud.daemon.plist com.bud.watcher.plist com.bud.ner-sidecar.plist; do
-        if [ -f "$SCRIPT_DIR/${plist}.example" ]; then
-            sed "s|@BUD_DIR@|$BUD_DIR|g; s|@HOME@|$HOME|g" \
-                "$SCRIPT_DIR/${plist}.example" > "$SCRIPT_DIR/$plist"
-        fi
-    done
+# Generate service config files from examples
+generate_service_configs() {
+    case "$OS" in
+        Darwin)
+            echo "Generating launchd plist files..."
+            for plist in com.bud.daemon.plist com.bud.ner-sidecar.plist; do
+                if [ -f "$SCRIPT_DIR/${plist}.example" ]; then
+                    sed "s|@BUD_DIR@|$BUD_DIR|g; s|@HOME@|$HOME|g" \
+                        "$SCRIPT_DIR/${plist}.example" > "$SCRIPT_DIR/$plist"
+                fi
+            done
+            ;;
+        *)
+            echo "Generating systemd unit files..."
+            for unit in bud.service ner-sidecar.service; do
+                if [ -f "$SCRIPT_DIR/${unit}.example" ]; then
+                    sed "s|@BUD_DIR@|$BUD_DIR|g; s|@HOME@|$HOME|g" \
+                        "$SCRIPT_DIR/${unit}.example" > "$SCRIPT_DIR/$unit"
+                fi
+            done
+            ;;
+    esac
 }
 
 # Create bin directory and build
 build_bud() {
     echo "Building bud..."
-    mkdir -p "$BUD_DIR/bin"
-    cd "$BUD_DIR"
-    go build -o bin/bud ./cmd/bud
-    go build -o bin/bud-mcp ./cmd/bud-mcp
-    echo "  Built: $BUD_DIR/bin/bud"
-    echo "  Built: $BUD_DIR/bin/bud-mcp"
+    "$BUD_DIR/scripts/build.sh"
 }
 
-# Install launchd services
+# Install services
 install_services() {
     echo ""
-    read -p "Install launchd services? [y/N] " -n 1 -r
-    echo ""
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        mkdir -p ~/Library/LaunchAgents
-        for plist in com.bud.daemon.plist com.bud.watcher.plist com.bud.ner-sidecar.plist; do
-            if [ -f "$SCRIPT_DIR/$plist" ]; then
-                cp "$SCRIPT_DIR/$plist" ~/Library/LaunchAgents/
-            fi
-        done
-        echo "  Copied plists to ~/Library/LaunchAgents/"
+    case "$OS" in
+        Darwin)
+            read -p "Install launchd services? [y/N] " -n 1 -r
+            echo ""
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                mkdir -p ~/Library/LaunchAgents
+                for plist in com.bud.daemon.plist com.bud.ner-sidecar.plist; do
+                    if [ -f "$SCRIPT_DIR/$plist" ]; then
+                        cp "$SCRIPT_DIR/$plist" ~/Library/LaunchAgents/
+                    fi
+                done
+                echo "  Copied plists to ~/Library/LaunchAgents/"
 
-        echo ""
-        read -p "Load services now? [y/N] " -n 1 -r
-        echo ""
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            launchctl load ~/Library/LaunchAgents/com.bud.daemon.plist 2>/dev/null || true
-            launchctl load ~/Library/LaunchAgents/com.bud.watcher.plist 2>/dev/null || true
-            launchctl load ~/Library/LaunchAgents/com.bud.ner-sidecar.plist 2>/dev/null || true
-            echo "  Services loaded"
-        fi
-    fi
+                echo ""
+                read -p "Load services now? [y/N] " -n 1 -r
+                echo ""
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    launchctl load ~/Library/LaunchAgents/com.bud.daemon.plist 2>/dev/null || true
+                    launchctl load ~/Library/LaunchAgents/com.bud.ner-sidecar.plist 2>/dev/null || true
+                    echo "  Services loaded"
+                fi
+            fi
+            ;;
+        *)
+            read -p "Install systemd user services? [y/N] " -n 1 -r
+            echo ""
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                mkdir -p ~/.config/systemd/user
+                for unit in bud.service ner-sidecar.service; do
+                    if [ -f "$SCRIPT_DIR/$unit" ]; then
+                        cp "$SCRIPT_DIR/$unit" ~/.config/systemd/user/
+                    fi
+                done
+                systemctl --user daemon-reload
+                echo "  Installed systemd units to ~/.config/systemd/user/"
+
+                echo ""
+                read -p "Enable and start services now? [y/N] " -n 1 -r
+                echo ""
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    systemctl --user enable --now bud.service 2>/dev/null || true
+                    systemctl --user enable --now ner-sidecar.service 2>/dev/null || true
+                    echo "  Services enabled and started"
+                fi
+            fi
+            ;;
+    esac
 }
 
 # Setup NER sidecar Python environment
@@ -109,8 +147,12 @@ setup_sidecar() {
     fi
 }
 
-# Setup Things integration (optional)
+# Setup Things integration (optional, macOS only)
 setup_things() {
+    if [ "$OS" != "Darwin" ]; then
+        return
+    fi
+
     echo ""
     read -p "Setup Things 3 integration? [y/N] " -n 1 -r
     echo ""
@@ -178,7 +220,7 @@ check_env() {
 # Main
 check_prereqs
 generate_deploy
-generate_plists
+generate_service_configs
 build_bud
 setup_sidecar
 setup_things
@@ -195,6 +237,15 @@ echo ""
 echo "To trigger redeploy from bud:"
 echo "  touch /tmp/bud-redeploy"
 echo ""
-echo "View logs:"
-echo "  tail -f ~/Library/Logs/bud.log"
-echo "  tail -f ~/Library/Logs/ner-sidecar.log"
+case "$OS" in
+    Darwin)
+        echo "View logs:"
+        echo "  tail -f ~/Library/Logs/bud.log"
+        echo "  tail -f ~/Library/Logs/ner-sidecar.log"
+        ;;
+    *)
+        echo "View logs:"
+        echo "  journalctl --user -u bud -f"
+        echo "  # or: tail -f ${XDG_STATE_HOME:-$HOME/.local/state}/bud/bud.log"
+        ;;
+esac
