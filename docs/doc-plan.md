@@ -6,7 +6,7 @@ Topics span modules — signals are the max across constituent modules.
 | Rank | Topic | Score | Key Modules | Signals | Status |
 |------|-------|-------|-------------|---------|--------|
 | 1 | Memory Quality Feedback Loop | 0.87 | `internal/executive`, `internal/engram` | centrality 8 (engram), no doc, 123 commits/90d, 57 fix-commits; RateEngrams() after signal_done is new. (foundational) | generated |
-| 2 | Startup Lifecycle & Context Injection | 0.85 | `cmd/bud`, `internal/executive`, `seed/startup-instructions.md` | no doc, 108 commits/90d, 49 fix-commits; startup now injects structured instructions, memory retrieval disabled. (foundational) | missing |
+| 2 | Startup Lifecycle & Context Injection | 0.85 | `cmd/bud`, `internal/executive`, `seed/startup-instructions.md` | no doc, 108 commits/90d, 49 fix-commits; startup now injects structured instructions, memory retrieval disabled. (foundational) | generated |
 | 3 | Session Lifecycle & Context Assembly | 0.80 | `internal/executive`, `internal/types` | centrality 33 (types), 123 commits/90d, 57 fix-commits; memory limit changed 10→6, startup path added. (foundational). Source: `session-lifecycle-context-assembly.md` | generated |
 | 4 | Subagent Orchestration | 0.80 | `internal/executive`, `internal/types`, `internal/effectors` | centrality 33, 123 commits/90d, 57 fix-commits; startup subagent restart-notes pattern added. (foundational). Source: `subagent-orchestration.md` | generated |
 | 5 | MCP Tool Dispatch & Registration | 0.58 | `internal/mcp`, `internal/types` | centrality 33 (via types), complexity max (5520 LoC, 9 files), 61 commits/90d. Source: `mcp-tool-dispatch-registration.md` | generated |
@@ -20,7 +20,7 @@ Topics span modules — signals are the max across constituent modules.
 
 ## Recommended next
 
-Run `dev:arch-doc "Startup Lifecycle & Context Injection"` on `bud2` — second-ranked missing topic; startup now injects structured instructions and the memory retrieval path differs from regular session startup.
+All top-priority topics generated. Run `dev:repo-doc bud2` to refresh the overview and doc-plan when significant new features land.
 
 ---
 _Generated: 2026-04-09T01:45:00Z | Commit: e790de89_
