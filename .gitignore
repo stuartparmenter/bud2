@@ -1,6 +1,3 @@
-# Runtime state (seeded from seed/ on first run)
-/state/
-
 # Go build artifacts
 /bud2
 /bud-mcp
@@ -8,10 +5,13 @@
 /bin/
 *.exe
 
+# Runtime state (seeded from seed/ on first run)
+/state/
+
 # Environment
 .env
 .env.local
-.env~
+bud.yaml
 
 # IDE
 .idea/
@@ -19,6 +19,9 @@
 *.swp
 .claude/
 /bud
+
+.DS_Store
+*~
 
 repomix.md
 
@@ -30,4 +33,3 @@ deploy/bud.service
 deploy/ner-sidecar.service
 sdk-harness
 sdk-verify
-.DS_Store
