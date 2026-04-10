@@ -17,7 +17,9 @@ import (
 
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 	"github.com/vthunder/bud2/internal/budget"
+	"github.com/vthunder/bud2/internal/config"
 	"github.com/vthunder/bud2/internal/engram"
+	"github.com/vthunder/bud2/internal/executive/provider"
 	"github.com/vthunder/bud2/internal/focus"
 	"github.com/vthunder/bud2/internal/logging"
 	"github.com/vthunder/bud2/internal/paths"
@@ -32,7 +34,11 @@ import (
 // - Uses episodes for conversation history
 // - Uses graph layer for memory retrieval
 type ExecutiveV2 struct {
-	session *SimpleSession
+	session *SimpleSession // Primary session (always SimpleSession for claude-code)
+
+	// Provider session for non-claude-code providers. When set, processItem
+	// delegates to this session instead of SimpleSession.SendPromptWithCfg.
+	providerSession provider.Session
 
 	// Focus-based attention
 	attention *focus.Attention
@@ -57,7 +63,6 @@ type ExecutiveV2 struct {
 	// Core identity (loaded from state/core.md)
 	coreIdentity string
 
-
 	// Config
 	config ExecutiveV2Config
 
@@ -81,6 +86,19 @@ const debugHistoryMax = 200
 
 // ExecutiveV2Config holds configuration for the v2 executive
 type ExecutiveV2Config struct {
+	// Provider is the LLM provider to use for executive sessions.
+	// If nil, falls back to claude-code (SimpleSession) behavior.
+	Provider provider.Provider
+
+	// AgentProvider is the LLM provider to use for agent/subagent sessions.
+	// If nil, falls back to the executive Provider.
+	AgentProvider provider.Provider
+
+	// ProviderName selects which provider to use (e.g. "claude-code", "opencode-serve")
+	ProviderName string
+	// ProviderConfig is the parsed bud.yaml config, used by providers to look up credentials
+	ProviderConfig *config.BudConfig
+
 	Model   string
 	WorkDir string
 
@@ -97,9 +115,9 @@ type ExecutiveV2Config struct {
 	// OnExecWake is called when the executive starts processing a focus item.
 	// existingClaudeSessionID is non-empty when resuming an existing Claude session
 	// (same session as the previous wake); empty when starting a fresh session.
-	OnExecWake func(focusID, context, existingClaudeSessionID string)
-	OnExecDone          func(focusID, summary string, durationSec float64, usage *SessionUsage)
-	OnMemoryEval        func(eval string) // Called when Claude outputs memory self-evaluation
+	OnExecWake   func(focusID, context, existingClaudeSessionID string)
+	OnExecDone   func(focusID, summary string, durationSec float64, usage *SessionUsage)
+	OnMemoryEval func(eval string) // Called when Claude outputs memory self-evaluation
 
 	// MCPServerURL is the HTTP URL for the bud2 MCP server (e.g. "http://127.0.0.1:8066/mcp").
 	// Passed directly to Claude SDK sessions so MCP tools are available without
@@ -143,6 +161,23 @@ func NewExecutiveV2(
 		mcpToolCalled:  make(map[string]bool),
 		debugListeners: make(map[string]func(DebugEvent)),
 		config:         cfg,
+	}
+
+	// If a non-claude-code provider is configured, create a provider session
+	// and set the agent provider on the subagent manager for agent sessions.
+	if cfg.Provider != nil && cfg.ProviderName != "claude-code" {
+		providerSess, err := cfg.Provider.NewSession(provider.SessionOpts{
+			Model:        cfg.Model,
+			WorkDir:      cfg.WorkDir,
+			MCPServerURL: cfg.MCPServerURL,
+		})
+		if err != nil {
+			log.Printf("[executive-v2] Warning: failed to create provider session, falling back to claude-code: %v", err)
+		} else {
+			exec.providerSession = providerSess
+			exec.subagents.AgentProvider = cfg.AgentProvider
+			log.Printf("[executive-v2] Using provider %s for executive and agent sessions", cfg.ProviderName)
+		}
 	}
 
 	// Load core identity from state/system/core.md
@@ -254,6 +289,7 @@ func (e *ExecutiveV2) SubagentCallbacks() (
 			AllowedTools:       allowedTools,
 			WorkDir:            e.config.WorkDir,
 			AgentDefs:          e.loadAgentDefs(),
+			Provider:           e.subagents.AgentProvider,
 			WorkflowInstanceID: workflowInstanceID,
 			WorkflowStep:       workflowStep,
 		})
@@ -412,6 +448,10 @@ func (e *ExecutiveV2) watchSubagentQuestions() {
 			Priority: focus.P2DueTask,
 			Content:  fmt.Sprintf("Subagent working on '%s' has a question: %s", truncate(task, 50), question),
 			Salience: 0.9,
+			Data: map[string]any{
+				"session_id": sessionID,
+				"question":   question,
+			},
 		}
 		if err := e.queue.Add(item); err != nil {
 			log.Printf("[executive-v2] Warning: failed to enqueue subagent question item: %v", err)
@@ -542,13 +582,11 @@ func (e *ExecutiveV2) watchSubagentDone() {
 			}
 		}
 
-		summary := truncate(result, 120)
-		if summary == "" {
-			summary = "(no output)"
-		}
-
 		itemData := map[string]any{
-			"session_id": sessionID,
+			"session_id":      sessionID,
+			"subagent_result": result,
+			"subagent_task":   task,
+			"subagent_status": label,
 		}
 		if workflowInstanceID != "" {
 			itemData["workflow_instance_id"] = workflowInstanceID
@@ -561,7 +599,7 @@ func (e *ExecutiveV2) watchSubagentDone() {
 			ID:       "subagent-done-" + sessionID,
 			Type:     "subagent-done",
 			Priority: focus.P3ActiveWork,
-			Content:  fmt.Sprintf("Subagent %s working on '%s': %s", label, truncate(task, 60), summary),
+			Content:  fmt.Sprintf("Subagent %s: '%s'", label, truncate(task, 80)),
 			Salience: 0.6,
 			Data:     itemData,
 		}
@@ -576,6 +614,9 @@ func (e *ExecutiveV2) watchSubagentDone() {
 func (e *ExecutiveV2) ResetSession() {
 	log.Println("[executive-v2] Resetting session (new session ID will be generated)")
 	e.session.Reset()
+	if e.providerSession != nil {
+		e.providerSession.Reset()
+	}
 }
 
 // AddPending adds an item to the pending queue
@@ -733,7 +774,7 @@ func (e *ExecutiveV2) SignalDone() {
 	defer e.backgroundMu.Unlock()
 	e.signalDoneActive = true
 	if e.signalDoneCancel != nil {
-		log.Printf("[executive] signal_done: terminating Claude subprocess cleanly")
+		log.Printf("[executive] signal_done: terminating session cleanly")
 		e.signalDoneCancel()
 	}
 }
@@ -792,6 +833,10 @@ func (e *ExecutiveV2) processItem(ctx context.Context, items []*focus.PendingIte
 	// ResolveMemoryEval can resolve them.
 	claudeSessionID := e.session.ClaudeSessionID()
 	shouldReset := e.session.ShouldReset()
+	// For non-claude-code providers, delegate reset check to provider session
+	if e.providerSession != nil {
+		shouldReset = e.providerSession.ShouldReset()
+	}
 	resuming := claudeSessionID != "" && !shouldReset
 
 	// Single persistent log file: all wakes append to logs/exec/executive.log.
@@ -805,7 +850,7 @@ func (e *ExecutiveV2) processItem(ctx context.Context, items []*focus.PendingIte
 		// Continue existing session: preserve seen memories, buffer sync, and session ID.
 		// buildPrompt will skip static context (core identity, conversation buffer)
 		// that's already in the Claude session history.
-		log.Printf("[executive-v2] Resuming Claude session: %s", claudeSessionID)
+		log.Printf("[executive-v2] Resuming session: %s", claudeSessionID)
 		e.session.PrepareForResume()
 	} else {
 		// Fresh session: full context injection, new Claude session.
@@ -813,7 +858,7 @@ func (e *ExecutiveV2) processItem(ctx context.Context, items []*focus.PendingIte
 			log.Printf("[executive-v2] Context limit reached, starting fresh session")
 			e.session.WriteSessionLogEntry("=== CONTEXT CLEARED (token limit) ===")
 		} else {
-			log.Printf("[executive-v2] Starting new Claude session (no prior session ID)")
+			log.Printf("[executive-v2] Starting new session (no prior session ID)")
 		}
 		e.session.PrepareNewSession()
 		e.session.SaveSessionToDisk() // persist cleared state immediately
@@ -856,6 +901,8 @@ func (e *ExecutiveV2) processItem(ctx context.Context, items []*focus.PendingIte
 		log.Printf("[executive-v2] Empty prompt, skipping item %s", item.ID)
 		return nil
 	}
+
+	e.session.WriteSessionLogEntry("PROMPT (%d chars):\n%s\n=== END PROMPT ===", len(prompt), prompt)
 
 	// Track whether user got a response (for validation)
 	// This needs to capture both direct tool calls AND MCP tool calls
@@ -932,10 +979,38 @@ func (e *ExecutiveV2) processItem(ctx context.Context, items []*focus.PendingIte
 	var sendErr error
 	func() {
 		defer profiling.Get().Start(item.ID, "executive.claude_api")()
-		sendErr = e.session.SendPrompt(sessionCtx, prompt, claudeCfg)
+		if e.providerSession != nil {
+			_, sendErr = e.providerSession.SendPrompt(sessionCtx, prompt, provider.StreamCallbacks{
+				OnText: func(text string) {
+					output.WriteString(text)
+					e.notifyDebug(DebugEvent{Type: DebugEventText, Text: text})
+					e.session.WriteSessionLogEntry("TEXT: %s", text)
+				},
+				OnTool: func(name string, input map[string]any) {
+					e.notifyDebug(DebugEvent{Type: DebugEventToolCall, Tool: name, Args: input})
+					e.session.WriteSessionLogEntry("TOOL: %s %v", name, input)
+					if strings.HasSuffix(name, "talk_to_user") || strings.HasSuffix(name, "send_message") || strings.HasSuffix(name, "respond_to_user") {
+						userGotResponse = true
+					}
+					if strings.HasSuffix(name, "discord_react") {
+						userGotResponse = true
+					}
+				},
+				OnResult: func(usage *provider.SessionUsage) {
+					e.session.WriteSessionLogEntry("RESULT: input=%d output=%d", usage.InputTokens, usage.OutputTokens)
+				},
+				OnPermission: func(perm provider.PermissionRequest) provider.PermissionDecision {
+					log.Printf("[executive] Permission request: type=%s title=%s id=%s", perm.Type, truncate(perm.Title, 80), perm.ID)
+					e.session.WriteSessionLogEntry("PERMISSION: type=%s title=%s", perm.Type, perm.Title)
+					return provider.PermissionAllow
+				},
+			})
+		} else {
+			sendErr = e.session.SendPromptWithCfg(sessionCtx, prompt, claudeCfg)
+		}
 	}()
 	if sendErr != nil {
-		if errors.Is(sendErr, ErrInterrupted) {
+		if errors.Is(sendErr, ErrInterrupted) || errors.Is(sendErr, provider.ErrInterrupted) {
 			e.backgroundMu.Lock()
 			wasDone := e.signalDoneActive
 			e.backgroundMu.Unlock()
@@ -954,7 +1029,7 @@ func (e *ExecutiveV2) processItem(ctx context.Context, items []*focus.PendingIte
 
 	duration := time.Since(startTime).Seconds()
 
-	// Persist the Claude session ID so the next wake (even after Bud restart) can resume.
+	// Persist the session ID so the next wake (even after Bud restart) can resume.
 	e.session.SaveSessionToDisk()
 
 	e.notifyDebug(DebugEvent{
@@ -976,20 +1051,25 @@ func (e *ExecutiveV2) processItem(ctx context.Context, items []*focus.PendingIte
 	}
 
 	// Log session completion summary with token stats
+	providerLabel := "session"
+	if e.config.ProviderName != "" {
+		providerLabel = e.config.ProviderName
+	}
 	if usage := e.session.LastUsage(); usage != nil {
-		log.Printf("✅ Session complete in %.1fs", duration)
+		log.Printf("✅ %s complete in %.1fs", providerLabel, duration)
 		log.Printf("   Tokens: input=%d output=%d cache_read=%d cache_create=%d turns=%d",
 			usage.InputTokens, usage.OutputTokens,
 			usage.CacheReadInputTokens, usage.CacheCreationInputTokens,
 			usage.NumTurns)
-		if id := e.session.ClaudeSessionID(); id != "" {
-			log.Printf("   Resume: claude --resume %s", id)
+	} else if e.providerSession != nil {
+		if pUsage := e.providerSession.LastUsage(); pUsage != nil {
+			log.Printf("✅ %s complete in %.1fs", providerLabel, duration)
+			log.Printf("   Tokens: input=%d output=%d", pUsage.InputTokens, pUsage.OutputTokens)
+		} else {
+			log.Printf("✅ %s complete in %.1fs (no usage data)", providerLabel, duration)
 		}
 	} else {
-		log.Printf("✅ Session complete in %.1fs (no usage data)", duration)
-		if id := e.session.ClaudeSessionID(); id != "" {
-			log.Printf("   Resume: claude --resume %s", id)
-		}
+		log.Printf("✅ %s complete in %.1fs (no usage data)", providerLabel, duration)
 	}
 
 	// Mark memories as seen so they're not re-injected on resume turns
@@ -1017,6 +1097,8 @@ func (e *ExecutiveV2) processItem(ctx context.Context, items []*focus.PendingIte
 	// VALIDATION: Check if user message was handled
 	// User messages (priority P1) MUST produce a response (talk_to_user or emoji reaction)
 	// Check both OnToolCall (for non-MCP tools) and mcpToolCalled (for MCP tools)
+	// For provider sessions (opencode), the agentic loop runs inside the provider,
+	// so talk_to_user happens internally. Text output means the user received a response.
 	mcpResponseSent := e.mcpToolCalled["talk_to_user"] || e.mcpToolCalled["discord_react"]
 	isUserMessage := false
 	for _, it := range items {
@@ -1025,7 +1107,10 @@ func (e *ExecutiveV2) processItem(ctx context.Context, items []*focus.PendingIte
 			break
 		}
 	}
-	if isUserMessage && !userGotResponse && !mcpResponseSent {
+	// For provider sessions, if we got text output, the model responded
+	// (even if we can't see the internal talk_to_user call).
+	providerGotResponse := e.providerSession != nil && output.Len() > 0
+	if isUserMessage && !userGotResponse && !mcpResponseSent && !providerGotResponse {
 		log.Printf("[executive] ERROR: User message completed without response")
 		logging.Debug("executive", "Item: %s, Content: %s", item.ID, truncate(item.Content, 50))
 		logging.Debug("executive", "Output length: %d, MCP tools: %v", output.Len(), e.mcpToolCalled)
@@ -1127,7 +1212,7 @@ func (e *ExecutiveV2) buildContext(items []*focus.PendingItem) *focus.ContextBun
 	// memories rated 1/5, dragging precision down to 29.6%. Wakes use generic prompts
 	// that pull irrelevant memories. Better to skip than pollute context.
 	memoryLimit := 6
-	if item.Type == "wake" || item.Content == "impulse:startup" {
+	if item.Type == "wake" || item.Content == "impulse:startup" || item.Type == "subagent-done" || item.Type == "subagent-question" {
 		memoryLimit = 0
 	}
 
@@ -1234,9 +1319,9 @@ func (e *ExecutiveV2) buildContext(items []*focus.PendingItem) *focus.ContextBun
 // as a conversation log using pyramid summaries. Excludes the current focus item.
 //
 // Variable buffer: min 30, max 100 episodes.
-// - Episodes 1-30: tiered compression (last 5 full, next 10 at C32, next 15 at C8)
-// - Episodes 31-100: C8 only, and ONLY for unconsolidated episodes (safety net so
-//   nothing is lost between consolidation cycles)
+//   - Episodes 1-30: tiered compression (last 5 full, next 10 at C32, next 15 at C8)
+//   - Episodes 31-100: C8 only, and ONLY for unconsolidated episodes (safety net so
+//     nothing is lost between consolidation cycles)
 //
 // Returns the formatted content and whether authorization patterns were detected.
 func (e *ExecutiveV2) buildRecentConversation(channelID string, excludeIDs []string) (string, bool) {
@@ -1297,7 +1382,7 @@ func (e *ExecutiveV2) buildRecentConversation(channelID string, excludeIDs []str
 		count int
 		level int
 	}{
-		{5, 0},  // Last 5: full text
+		{5, 0},   // Last 5: full text
 		{10, 32}, // Next 10: ~32 words (L1)
 		{15, 8},  // Next 15: ~8 words (L2)
 	}
@@ -1502,6 +1587,10 @@ func focusSectionHeader(item *focus.PendingItem) string {
 		return "## Message"
 	case item.Type == "wake":
 		return "## Autonomous Wake"
+	case item.Type == "subagent-done":
+		return "## Subagent Completed"
+	case item.Type == "subagent-question":
+		return "## Subagent Question"
 	case item.Content == "impulse:startup" || (strings.HasPrefix(item.Source, "impulse:") && item.Type == "unknown"):
 		return "## Startup"
 	default:
@@ -1547,6 +1636,24 @@ func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 	var prompt strings.Builder
 
 	isResuming := e.session.IsResuming()
+	isMinimal := bundle.CurrentFocus != nil && (bundle.CurrentFocus.Type == "subagent-done" || bundle.CurrentFocus.Type == "subagent-question")
+
+	// Short replies (yes/no/redeploy/etc) don't need heavy context either
+	isShortReply := false
+	if bundle.CurrentFocus != nil && (bundle.CurrentFocus.Source == "inbox" || bundle.CurrentFocus.Type == "message") {
+		trimmed := strings.TrimSpace(bundle.CurrentFocus.Content)
+		if len(trimmed) <= 30 {
+			lower := strings.ToLower(trimmed)
+			shortPatterns := []string{"yes", "no", "yep", "nope", "ok", "okay", "done", "redeploy", "restart", "stop", "go", "skip", "sure", "thanks", "retry", "continue", "y", "n", "approve", "deny", "allow", "reject"}
+			for _, p := range shortPatterns {
+				if lower == p {
+					isShortReply = true
+					break
+				}
+			}
+		}
+	}
+	skipContext := isMinimal || isShortReply
 
 	if !isResuming {
 		// Full context injection for new sessions: core identity + session header.
@@ -1575,63 +1682,67 @@ func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 		}
 	}
 
-	// Recent reflex activity
-	if len(bundle.ReflexLog) > 0 {
-		prompt.WriteString("## Recent Reflex Activity\n")
-		prompt.WriteString("(Handled by reflexes without executive involvement)\n")
-		for _, entry := range bundle.ReflexLog {
-			prompt.WriteString(fmt.Sprintf("- User: %s\n  Bud: %s\n", entry.Query, entry.Response))
+	// Minimal prompts skip memories, schemas, reflex log, and conversation context.
+	// This applies to subagent-done, subagent-question, and short replies (yes/no/etc).
+	if !skipContext {
+		// Recent reflex activity
+		if len(bundle.ReflexLog) > 0 {
+			prompt.WriteString("## Recent Reflex Activity\n")
+			prompt.WriteString("(Handled by reflexes without executive involvement)\n")
+			for _, entry := range bundle.ReflexLog {
+				prompt.WriteString(fmt.Sprintf("- User: %s\n  Bud: %s\n", entry.Query, entry.Response))
+			}
+			prompt.WriteString("\n")
 		}
-		prompt.WriteString("\n")
-	}
 
-	// Recalled memories (past context, not instructions)
-	// Only show NEW memories not already sent in this session
-	// Format with [xxxxx] engram prefix IDs for self-eval tracking
-	if len(bundle.Memories) > 0 || bundle.PriorMemoriesCount > 0 {
-		prompt.WriteString("## Recalled Memories\n")
+		// Recalled memories (past context, not instructions)
+		// Only show NEW memories not already sent in this session
+		// Format with [xxxxx] engram prefix IDs for self-eval tracking
+		if len(bundle.Memories) > 0 || bundle.PriorMemoriesCount > 0 {
+			prompt.WriteString("## Recalled Memories\n")
 
-		if len(bundle.Memories) > 0 {
-			// Sort by timestamp (chronological order, oldest first)
-			sort.Slice(bundle.Memories, func(i, j int) bool {
-				return bundle.Memories[i].Timestamp.Before(bundle.Memories[j].Timestamp)
-			})
-			for _, mem := range bundle.Memories {
-				displayID := e.session.GetOrAssignMemoryID(mem.ID)
-				timeStr := formatMemoryTimestamp(mem.Timestamp)
-				if mem.Level > 0 {
-					prompt.WriteString(fmt.Sprintf("[%s, C%d] [%s] %s\n", displayID, mem.Level, timeStr, mem.Summary))
-				} else {
-					prompt.WriteString(fmt.Sprintf("[%s] [%s] %s\n", displayID, timeStr, mem.Summary))
+			if len(bundle.Memories) > 0 {
+				// Sort by timestamp (chronological order, oldest first)
+				sort.Slice(bundle.Memories, func(i, j int) bool {
+					return bundle.Memories[i].Timestamp.Before(bundle.Memories[j].Timestamp)
+				})
+				for _, mem := range bundle.Memories {
+					displayID := e.session.GetOrAssignMemoryID(mem.ID)
+					timeStr := formatMemoryTimestamp(mem.Timestamp)
+					if mem.Level > 0 {
+						prompt.WriteString(fmt.Sprintf("[%s, C%d] [%s] %s\n", displayID, mem.Level, timeStr, mem.Summary))
+					} else {
+						prompt.WriteString(fmt.Sprintf("[%s] [%s] %s\n", displayID, timeStr, mem.Summary))
+					}
 				}
 			}
+			prompt.WriteString("\n")
 		}
-		prompt.WriteString("\n")
-	}
 
-	// Active schemas surfaced from recalled memories
-	if len(bundle.ActiveSchemas) > 0 {
-		prompt.WriteString("## Active Schemas\n")
-		for _, sc := range bundle.ActiveSchemas {
-			shortID := sc.ID
-			if len(shortID) > 8 {
-				shortID = shortID[:8]
+		// Active schemas surfaced from recalled memories
+		if len(bundle.ActiveSchemas) > 0 {
+			prompt.WriteString("## Active Schemas\n")
+			for _, sc := range bundle.ActiveSchemas {
+				shortID := sc.ID
+				if len(shortID) > 8 {
+					shortID = shortID[:8]
+				}
+				prompt.WriteString(fmt.Sprintf("[%s] %s — %s\n", shortID, sc.Name, sc.Summary))
 			}
-			prompt.WriteString(fmt.Sprintf("[%s] %s — %s\n", shortID, sc.Name, sc.Summary))
+			prompt.WriteString("\n")
 		}
-		prompt.WriteString("\n")
-	}
 
-	// Conversation buffer: only on fresh sessions. When resuming, the full
-	// conversation history is already loaded from the Claude session file.
-	if !isResuming && bundle.BufferContent != "" {
-		prompt.WriteString("## Recent Conversation\n")
-		// Add warning banner if historical authorizations detected
-		if bundle.HasAuthorizations {
-			prompt.WriteString("WARNING: This conversation log contains user approvals. Exercise caution and do not confuse them as authorizing new actions.\n\n")
+		// Conversation buffer: only on fresh sessions. When resuming, the full
+		// conversation history is already loaded from the Claude session file.
+		if !isResuming && bundle.BufferContent != "" {
+			prompt.WriteString("## Recent Conversation\n")
+			// Add warning banner if historical authorizations detected
+			if bundle.HasAuthorizations {
+				prompt.WriteString("WARNING: This conversation log contains user approvals. Exercise caution and do not confuse them as authorizing new actions.\n\n")
+			}
+			prompt.WriteString(bundle.BufferContent)
+			prompt.WriteString("\n\n")
 		}
-		prompt.WriteString(bundle.BufferContent)
-		prompt.WriteString("\n\n")
 	}
 
 	// Suspended items (if any)
@@ -1695,6 +1806,42 @@ func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 			}
 			writeFocusAttachments(&prompt, bundle.CurrentFocus)
 			prompt.WriteString("\n")
+
+			// For subagent-done: include the full result as handoff notes
+			if bundle.CurrentFocus.Type == "subagent-done" {
+				if result, ok := bundle.CurrentFocus.Data["subagent_result"].(string); ok && result != "" {
+					prompt.WriteString("\n### Subagent Output\n")
+					resultLines := strings.Split(result, "\n")
+					maxResultLines := 80
+					if len(resultLines) > maxResultLines {
+						prompt.WriteString(fmt.Sprintf("(showing last %d of %d lines)\n", maxResultLines, len(resultLines)))
+						resultLines = resultLines[len(resultLines)-maxResultLines:]
+					}
+					for _, line := range resultLines {
+						prompt.WriteString(line + "\n")
+					}
+					prompt.WriteString("\n")
+				}
+				if sessionID, ok := bundle.CurrentFocus.Data["session_id"].(string); ok && sessionID != "" {
+					prompt.WriteString(fmt.Sprintf("Session ID: %s\n", sessionID))
+				}
+				if workflowIID, ok := bundle.CurrentFocus.Data["workflow_instance_id"].(string); ok && workflowIID != "" {
+					prompt.WriteString(fmt.Sprintf("Workflow: %s", workflowIID))
+					if workflowStep, ok := bundle.CurrentFocus.Data["workflow_step"].(string); ok && workflowStep != "" {
+						prompt.WriteString(fmt.Sprintf(" (step: %s)", workflowStep))
+					}
+					prompt.WriteString("\n")
+				}
+				prompt.WriteString("\nCall `get_subagent_status` with the session ID to review staged memories and full details.\n")
+			}
+
+			// For subagent-question: include session ID and instruction to answer
+			if bundle.CurrentFocus.Type == "subagent-question" {
+				if sessionID, ok := bundle.CurrentFocus.Data["session_id"].(string); ok && sessionID != "" {
+					prompt.WriteString(fmt.Sprintf("\nSession ID: %s\n", sessionID))
+				}
+				prompt.WriteString("\nReply with your answer. Use `answer_subagent` with the session ID and your answer.\n")
+			}
 		}
 
 		// For autonomous wake impulses, inject the wakeup checklist
@@ -1735,8 +1882,8 @@ func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 		}
 	}
 
-	// Memory self-eval instruction (only if memories were shown)
-	if len(bundle.Memories) > 0 {
+	// Memory self-eval instruction (only if memories were shown — skipped for minimal prompts)
+	if !skipContext && len(bundle.Memories) > 0 {
 		prompt.WriteString("## Memory Eval\nRate recalled memories in signal_done memory_eval (1=low, 5=high knowledge value).\n\n")
 	}
 
@@ -1828,7 +1975,10 @@ func (e *ExecutiveV2) Stop() error {
 		log.Printf("[executive-v2] Warning: failed to save queue: %v", err)
 	}
 
-	// Close session
+	// Close sessions
+	if e.providerSession != nil {
+		e.providerSession.Close()
+	}
 	return e.session.Close()
 }
 
@@ -1851,5 +2001,3 @@ func extractMemoryEval(text string) string {
 	evalStart := startIdx + len(startTag)
 	return strings.TrimSpace(text[evalStart:endIdx])
 }
-
-

@@ -1,8 +1,25 @@
 #!/bin/bash
 # Deploy script for bud on Mac Mini
-# Usage: ./deploy.sh [--no-restart]
+# Usage: ./deploy.sh [--config /path/to/bud.yaml] [--no-restart]
 
 set -e
+
+# Parse arguments
+BUD_CONFIG_PATH=""
+NO_RESTART=false
+for arg in "$@"; do
+    case "$arg" in
+        --config=*)
+            BUD_CONFIG_PATH="${arg#--config=}"
+            ;;
+        --config)
+            # handled in next iteration
+            ;;
+        --no-restart)
+            NO_RESTART=true
+            ;;
+    esac
+done
 
 # Ensure Homebrew paths are available (Apple Silicon + Intel)
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -28,8 +45,11 @@ codesign --sign "bud-dev" --force --deep bin/bud >> "$LOG_FILE" 2>&1
 echo "$(date): Build complete" >> "$LOG_FILE"
 
 # Restart unless --no-restart flag
-if [[ "$1" != "--no-restart" ]]; then
+if [ "$NO_RESTART" = "false" ]; then
     echo "Restarting bud service..."
+    if [ -n "$BUD_CONFIG_PATH" ]; then
+        export BUD_CONFIG="$BUD_CONFIG_PATH"
+    fi
     launchctl kickstart -k gui/$(id -u)/com.bud.daemon 2>/dev/null || \
         launchctl stop com.bud.daemon 2>/dev/null || true
     sleep 1

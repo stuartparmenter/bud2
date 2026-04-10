@@ -21,9 +21,8 @@ If there are no actionable Things tasks in the Bud area (and no blocked subagent
 
 ```
 Agent_spawn_async(
-  profile: "coder",
-  task: "Read state/system/plugins/dev/skills/doc-maintain/SKILL.md and follow its instructions exactly. Sub-skills (doc-scan, repo-doc, doc-audit, arch-doc) are at state/system/plugins/dev/skills/<name>/SKILL.md — read them when doc-maintain references them. Use --autonomous flag throughout. Stop after one improvement.",
-  constraints: "Idle fallback — no other tasks pending."
+  profile: "bud:doc-maintain",
+  constraints: "Idle fallback — no other tasks pending. Use --autonomous flag throughout. Stop after one improvement."
 )
 ```
 
@@ -38,7 +37,7 @@ Short tasks you can do directly in <2 min:
 
 **Do not** do deep code work, long research, or multi-step implementations inline.
 
-## 4. Call signal_done
+## 5. Call signal_done
 
 Always call `signal_done` with:
 - `summary`: what subagents are running / what was completed

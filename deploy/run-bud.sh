@@ -26,8 +26,14 @@ if [ -f "$BUD_DIR/.env" ]; then
     set +a
 fi
 
+# Bud config file (optional)
+BUD_CONFIG_FLAG=""
+if [ -n "$BUD_CONFIG" ]; then
+    BUD_CONFIG_FLAG="--config=$BUD_CONFIG"
+fi
+
 mkdir -p "$(dirname "$LOG_FILE")"
 echo "$(date): === Starting bud ===" >> "$LOG_FILE"
 
 # Run bud, capturing both stdout and stderr to log file
-exec "$BUD_DIR/bin/bud" >> "$LOG_FILE" 2>&1
+exec "$BUD_DIR/bin/bud" $BUD_CONFIG_FLAG >> "$LOG_FILE" 2>&1

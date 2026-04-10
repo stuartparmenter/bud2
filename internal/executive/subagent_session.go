@@ -22,6 +22,7 @@ import (
 	"time"
 
 	claudecode "github.com/severity1/claude-agent-sdk-go"
+	"github.com/vthunder/bud2/internal/executive/provider"
 	"github.com/vthunder/bud2/internal/paths"
 )
 
@@ -29,10 +30,10 @@ import (
 type SubagentEventKind string
 
 const (
-	SubagentEventToolCall  SubagentEventKind = "tool_call"
-	SubagentEventText      SubagentEventKind = "text"
-	SubagentEventThinking  SubagentEventKind = "thinking"
-	SubagentEventError     SubagentEventKind = "error"
+	SubagentEventToolCall SubagentEventKind = "tool_call"
+	SubagentEventText     SubagentEventKind = "text"
+	SubagentEventThinking SubagentEventKind = "thinking"
+	SubagentEventError    SubagentEventKind = "error"
 )
 
 // SubagentEvent records a discrete activity from a subagent session.
@@ -226,6 +227,10 @@ type SubagentManager struct {
 	sessions  map[string]*SubagentSession // keyed by session ID (Claude ID once known)
 	statePath string                      // path to state directory (for plugin discovery)
 
+	// AgentProvider is the provider to use for agent sessions.
+	// If nil, falls back to Claude Code SDK.
+	AgentProvider provider.Provider
+
 	// Notify executive when a subagent has a pending question
 	QuestionNotify chan *SubagentSession
 
@@ -265,7 +270,7 @@ type SubagentConfig struct {
 	// SystemPromptAppend is extra content appended to the subagent's system prompt.
 	SystemPromptAppend string
 
-	// Model overrides the default model (empty = use default).
+	// Model overrides the default model (empty = use provider default).
 	Model string
 
 	// WorkDir overrides the working directory for the Claude subprocess.
@@ -282,6 +287,10 @@ type SubagentConfig struct {
 	// AgentDefs registers programmatic agent definitions so the built-in Agent tool
 	// can resolve "namespace:name" style subagent references without file management.
 	AgentDefs map[string]claudecode.AgentDefinition
+
+	// Provider is the LLM provider to use for this subagent session.
+	// If nil, falls back to Claude Code SDK.
+	Provider provider.Provider
 
 	// Workflow fields — optional, set when this subagent is part of a multi-step workflow.
 	WorkflowInstanceID string // e.g. "wf_1711062766"
@@ -425,10 +434,231 @@ func (m *SubagentManager) Cleanup(olderThan time.Duration) int {
 	return removed
 }
 
-// runSession runs the subagent Claude session to completion using the SDK.
+// runSession runs the subagent session. If cfg.Provider is set, it uses
+// the provider-based session (opencode, etc.). Otherwise, it falls back
+// to the Claude Code SDK.
+func (m *SubagentManager) runSession(ctx context.Context, session *SubagentSession, cfg SubagentConfig) {
+	if cfg.Provider != nil {
+		m.runProviderSession(ctx, session, cfg)
+		return
+	}
+	m.runClaudeSession(ctx, session, cfg)
+}
+
+// runProviderSession runs a subagent session using the provider interface.
+func (m *SubagentManager) runProviderSession(ctx context.Context, session *SubagentSession, cfg SubagentConfig) {
+	// Open a session log file (same format as executive session logs).
+	var logFile *os.File
+	if cfg.WorkDir != "" {
+		logDir := filepath.Join(paths.LogDir(), "agents")
+		if err := os.MkdirAll(logDir, 0755); err == nil {
+			logPath := filepath.Join(logDir, "subagent-"+session.ID[:8]+".log")
+			if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); err == nil {
+				logFile = f
+				session.LogPath = logPath
+				defer logFile.Close()
+			} else {
+				log.Printf("[subagent-%s] cannot open log file: %v", session.ID[:8], err)
+			}
+		}
+	}
+
+	providerSess, err := cfg.Provider.NewSession(provider.SessionOpts{
+		Model:        cfg.Model,
+		WorkDir:      cfg.WorkDir,
+		MCPServerURL: cfg.MCPServerURL,
+	})
+	if err != nil {
+		session.mu.Lock()
+		session.status = SubagentFailed
+		session.lastErr = fmt.Errorf("failed to create provider session: %w", err)
+		session.mu.Unlock()
+		m.DoneNotify <- session
+		return
+	}
+	defer providerSess.Close()
+
+	// Signal the session ID so Spawn() can re-key the session map.
+	newID := providerSess.SessionID()
+	session.mu.Lock()
+	session.ID = newID
+	session.mu.Unlock()
+	select {
+	case session.claudeIDReady <- newID:
+	default:
+	}
+
+	m.mu.Lock()
+	delete(m.sessions, session.ID) // remove temp ID entry
+	m.sessions[newID] = session
+	m.mu.Unlock()
+
+	log.Printf("[subagent-%s] Starting provider session (task: %s)", newID[:8], truncate(cfg.Task, 60))
+	if logFile != nil {
+		writeLog(logFile, "=== PROVIDER SESSION %s ===", newID)
+		writeLog(logFile, "Task: %s", cfg.Task)
+	}
+
+	prompt := fmt.Sprintf("## Task\n%s\n\nBegin work on this task. When you are done, finish your response.", cfg.Task)
+
+	if logFile != nil {
+		writeLog(logFile, "=== PROMPT (%d chars) ===", len(prompt))
+		fmt.Fprintf(logFile, "%s\n=== END PROMPT ===\n\n", prompt)
+	}
+
+	var result strings.Builder
+	_, err = providerSess.SendPrompt(ctx, prompt, provider.StreamCallbacks{
+		OnText: func(text string) {
+			result.WriteString(text)
+			log.Printf("[subagent-%s] text: %s", newID[:8], truncate(text, 300))
+			if logFile != nil {
+				writeLog(logFile, "TEXT: %s", text)
+			}
+			session.appendEvent(SubagentEvent{
+				Kind:    SubagentEventText,
+				At:      time.Now(),
+				Summary: truncate(text, 120),
+			})
+		},
+		OnTool: func(name string, input map[string]any) {
+			summary := summarizeToolInput(name, input)
+			log.Printf("[subagent-%s] calling tool: %s %s", newID[:8], name, summary)
+			if logFile != nil {
+				writeLog(logFile, "TOOL: %s %s", name, summary)
+			}
+			session.appendEvent(SubagentEvent{
+				Kind:     SubagentEventToolCall,
+				At:       time.Now(),
+				ToolName: name,
+				Summary:  summary,
+			})
+
+			// Intercept AskUserQuestion for question routing
+			if name == "AskUserQuestion" || name == "mcp__bud2__AskUserQuestion" {
+				question := extractAskUserQuestionText(input)
+				session.mu.Lock()
+				session.status = SubagentWaitingForInput
+				session.pendingQuestion = question
+				session.mu.Unlock()
+
+				log.Printf("[subagent] Session %s has question: %s", newID, truncate(question, 80))
+
+				select {
+				case m.QuestionNotify <- session:
+				case <-ctx.Done():
+					return
+				}
+
+				// Wait for answer from executive
+				select {
+				case <-session.answerReady:
+					session.mu.Lock()
+					session.status = SubagentRunning
+					session.pendingQuestion = ""
+					session.mu.Unlock()
+					log.Printf("[subagent-%s] Received answer, continuing", newID[:8])
+				case <-ctx.Done():
+					return
+				}
+			}
+
+			// Intercept save_thought for staging
+			if name == "save_thought" || name == "mcp__bud2__save_thought" {
+				content, _ := input["content"].(string)
+				if content != "" {
+					session.AddStagedMemory(content)
+					log.Printf("[subagent-%s] staged memory: %s", newID[:8], truncate(content, 60))
+				}
+			}
+		},
+		OnThinking: func(text string) {
+			log.Printf("[subagent-%s] thinking: %s", newID[:8], truncate(text, 300))
+			if logFile != nil {
+				writeLog(logFile, "THINKING: %s", truncate(text, 300))
+			}
+			session.appendEvent(SubagentEvent{
+				Kind:    SubagentEventThinking,
+				At:      time.Now(),
+				Summary: truncate(text, 120),
+			})
+		},
+		OnResult: func(usage *provider.SessionUsage) {
+			log.Printf("[subagent-%s] Session complete (input=%d output=%d)", newID[:8], usage.InputTokens, usage.OutputTokens)
+			if logFile != nil {
+				writeLog(logFile, "RESULT: input=%d output=%d", usage.InputTokens, usage.OutputTokens)
+			}
+		},
+		OnPermission: func(perm provider.PermissionRequest) provider.PermissionDecision {
+			log.Printf("[subagent-%s] Permission request: type=%s title=%s id=%s", newID[:8], perm.Type, truncate(perm.Title, 80), perm.ID)
+			if logFile != nil {
+				writeLog(logFile, "PERMISSION: type=%s title=%s id=%s", perm.Type, perm.Title, perm.ID)
+			}
+
+			// Route permission request to the executive as a question.
+			// The executive decides whether to approve or deny, potentially
+			// asking the user via Discord.
+			question := fmt.Sprintf("Subagent permission request: %s", perm.Title)
+			if perm.Title == "" {
+				question = fmt.Sprintf("Subagent permission request: %s", perm.Type)
+			}
+			session.mu.Lock()
+			session.status = SubagentWaitingForInput
+			session.pendingQuestion = question
+			session.mu.Unlock()
+
+			log.Printf("[subagent] Session %s has permission question: %s", newID, truncate(question, 80))
+
+			select {
+			case m.QuestionNotify <- session:
+			case <-ctx.Done():
+				return provider.PermissionDeny
+			}
+
+			// Wait for answer from executive
+			var answer string
+			select {
+			case answer = <-session.answerReady:
+				session.mu.Lock()
+				session.status = SubagentRunning
+				session.pendingQuestion = ""
+				session.mu.Unlock()
+				log.Printf("[subagent-%s] Permission decision: %s", newID[:8], answer)
+			case <-ctx.Done():
+				return provider.PermissionDeny
+			}
+
+			// Accept "allow", "approve", "yes", "y" as approval
+			switch strings.ToLower(strings.TrimSpace(answer)) {
+			case "allow", "approve", "yes", "y", "true":
+				return provider.PermissionAllow
+			default:
+				return provider.PermissionDeny
+			}
+		},
+	})
+
+	session.mu.Lock()
+	session.result = result.String()
+	if session.stopped {
+		session.status = SubagentStopped
+		log.Printf("[subagent] Session %s stopped", session.ID)
+	} else if err != nil {
+		session.status = SubagentFailed
+		session.lastErr = err
+		log.Printf("[subagent] Session %s failed: %v", session.ID, err)
+	} else {
+		session.status = SubagentCompleted
+		log.Printf("[subagent] Session %s completed", session.ID)
+	}
+	session.mu.Unlock()
+
+	m.DoneNotify <- session
+}
+
+// runClaudeSession runs the subagent Claude session to completion using the SDK.
 // Uses CanUseTool to intercept AskUserQuestion and block until the executive
 // provides an answer — no subprocess restart needed.
-func (m *SubagentManager) runSession(ctx context.Context, session *SubagentSession, cfg SubagentConfig) {
+func (m *SubagentManager) runClaudeSession(ctx context.Context, session *SubagentSession, cfg SubagentConfig) {
 	questionCallback := claudecode.WithCanUseTool(func(
 		ctx context.Context,
 		toolName string,

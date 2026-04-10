@@ -297,6 +297,18 @@ func TestBuildPrompt_CurrentFocusBasic(t *testing.T) {
 			},
 			expectedHeader: "## Current Focus",
 		},
+		{
+			name: "subagent-done uses ## Subagent Completed",
+			item: &focus.PendingItem{
+				Type: "subagent-done", Source: "internal", Content: "Subagent completed working on 'task'",
+			},
+			expectedHeader: "## Subagent Completed",
+		},
+		{
+			name:           "subagent-question uses ## Subagent Question",
+			item:           &focus.PendingItem{Type: "subagent-question", Source: "internal", Content: "Subagent has a question"},
+			expectedHeader: "## Subagent Question",
+		},
 	}
 
 	for _, tc := range cases {
@@ -526,5 +538,166 @@ func TestBuildPrompt_WakeFocusNoInstructions(t *testing.T) {
 	// Without WakeupInstructions, the wake context block should not appear
 	if strings.Contains(out, "## Conversation Log") {
 		t.Errorf("expected no wake context without WakeupInstructions, got:\n%s", out)
+	}
+}
+
+// TestBuildPrompt_SubagentDone verifies that subagent-done prompts are minimal:
+// no memories, schemas, conversation buffer, or memory eval, and include the
+// Subagent Completed header and handoff notes.
+func TestBuildPrompt_SubagentDone(t *testing.T) {
+	exec := newTestExecutive(t)
+	ts := time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)
+
+	bundle := &focus.ContextBundle{
+		CoreIdentity: "# Core Identity",
+		CurrentFocus: &focus.PendingItem{
+			Type:    "subagent-done",
+			Content: "Subagent completed: 'list files'",
+			Data: map[string]any{
+				"session_id":      "sa-abc123",
+				"subagent_result": "Directory listing complete.\n38 files found.",
+				"subagent_task":   "list files",
+				"subagent_status": "completed",
+			},
+		},
+		Memories: []focus.MemorySummary{
+			{ID: "mem1", Summary: "irrelevant memory", Timestamp: ts},
+		},
+		ActiveSchemas: []*focus.SchemaSummary{
+			{ID: "schema1", Name: "Test Schema", Summary: "should not appear"},
+		},
+		BufferContent: "[user] hello\n[bud] hi there",
+		ReflexLog: []focus.ReflexActivity{
+			{Query: "test query", Response: "test response"},
+		},
+	}
+	out := exec.buildPrompt(bundle)
+
+	// Must have Subagent Completed header
+	if !strings.Contains(out, "## Subagent Completed") {
+		t.Errorf("expected ## Subagent Completed header, got:\n%s", out)
+	}
+
+	// Must have subagent result/handoff
+	if !strings.Contains(out, "### Subagent Output") {
+		t.Errorf("expected ### Subagent Output section, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Directory listing complete") {
+		t.Errorf("expected subagent result content, got:\n%s", out)
+	}
+
+	// Must have session ID
+	if !strings.Contains(out, "Session ID: sa-abc123") {
+		t.Errorf("expected Session ID in output, got:\n%s", out)
+	}
+
+	// Must have instruction to call get_subagent_status
+	if !strings.Contains(out, "get_subagent_status") {
+		t.Errorf("expected get_subagent_status instruction, got:\n%s", out)
+	}
+
+	// Must NOT have memories, schemas, conversation, reflex log, or memory eval
+	if strings.Contains(out, "## Recalled Memories") {
+		t.Errorf("expected no ## Recalled Memories for subagent-done, got:\n%s", out)
+	}
+	if strings.Contains(out, "## Active Schemas") {
+		t.Errorf("expected no ## Active Schemas for subagent-done, got:\n%s", out)
+	}
+	if strings.Contains(out, "## Recent Conversation") {
+		t.Errorf("expected no ## Recent Conversation for subagent-done, got:\n%s", out)
+	}
+	if strings.Contains(out, "## Recent Reflex Activity") {
+		t.Errorf("expected no ## Recent Reflex Activity for subagent-done, got:\n%s", out)
+	}
+	if strings.Contains(out, "## Memory Eval") {
+		t.Errorf("expected no ## Memory Eval for subagent-done, got:\n%s", out)
+	}
+}
+
+// TestBuildPrompt_SubagentQuestion verifies that subagent-question prompts are minimal
+// and include the session ID and answer instruction.
+func TestBuildPrompt_SubagentQuestion(t *testing.T) {
+	exec := newTestExecutive(t)
+
+	bundle := &focus.ContextBundle{
+		CurrentFocus: &focus.PendingItem{
+			Type:    "subagent-question",
+			Content: "Subagent working on 'list files' has a question: Should I include hidden files?",
+			Data: map[string]any{
+				"session_id": "sa-xyz789",
+				"question":   "Should I include hidden files?",
+			},
+		},
+		Memories: []focus.MemorySummary{
+			{ID: "mem1", Summary: "irrelevant memory"},
+		},
+		BufferContent: "[user] hello",
+	}
+	out := exec.buildPrompt(bundle)
+
+	if !strings.Contains(out, "## Subagent Question") {
+		t.Errorf("expected ## Subagent Question header, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Session ID: sa-xyz789") {
+		t.Errorf("expected Session ID in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "answer_subagent") {
+		t.Errorf("expected answer_subagent instruction, got:\n%s", out)
+	}
+	if strings.Contains(out, "## Recalled Memories") {
+		t.Errorf("expected no ## Recalled Memories for subagent-question, got:\n%s", out)
+	}
+	if strings.Contains(out, "## Memory Eval") {
+		t.Errorf("expected no ## Memory Eval for subagent-question, got:\n%s", out)
+	}
+}
+
+// TestBuildPrompt_ShortReply verifies that short replies (yes/no/etc) skip
+// heavy context sections like memories and schemas.
+func TestBuildPrompt_ShortReply(t *testing.T) {
+	exec := newTestExecutive(t)
+
+	shortReplies := []string{"yes", "no", "ok", "redeploy", "approve", "deny"}
+	for _, reply := range shortReplies {
+		bundle := &focus.ContextBundle{
+			CurrentFocus: &focus.PendingItem{
+				Type:    "message",
+				Source:  "inbox",
+				Content: reply,
+			},
+			Memories: []focus.MemorySummary{
+				{ID: "mem1", Summary: "some memory"},
+			},
+			ActiveSchemas: []*focus.SchemaSummary{
+				{ID: "schema1", Name: "Test Schema", Summary: "should not appear"},
+			},
+		}
+		out := exec.buildPrompt(bundle)
+
+		if strings.Contains(out, "## Recalled Memories") {
+			t.Errorf("short reply %q: expected no ## Recalled Memories, got:\n%s", reply, out)
+		}
+		if strings.Contains(out, "## Active Schemas") {
+			t.Errorf("short reply %q: expected no ## Active Schemas, got:\n%s", reply, out)
+		}
+		if strings.Contains(out, "## Memory Eval") {
+			t.Errorf("short reply %q: expected no ## Memory Eval, got:\n%s", reply, out)
+		}
+	}
+
+	// Verify that a longer message DOES include memories
+	bundle := &focus.ContextBundle{
+		CurrentFocus: &focus.PendingItem{
+			Type:    "message",
+			Source:  "inbox",
+			Content: "What do you think about the new deployment strategy we discussed yesterday?",
+		},
+		Memories: []focus.MemorySummary{
+			{ID: "mem1", Summary: "some memory"},
+		},
+	}
+	out := exec.buildPrompt(bundle)
+	if !strings.Contains(out, "## Recalled Memories") {
+		t.Errorf("longer message: expected ## Recalled Memories, got:\n%s", out)
 	}
 }

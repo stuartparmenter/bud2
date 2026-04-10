@@ -9,18 +9,68 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	claudecode "github.com/severity1/claude-agent-sdk-go"
+	"github.com/vthunder/bud2/internal/executive/provider"
 	"github.com/vthunder/bud2/internal/logging"
 	"gopkg.in/yaml.v3"
 )
 
-// ErrInterrupted is returned by SendPrompt when the session is cancelled by a
+// Compile-time check that SimpleSession satisfies provider.Session
+var _ provider.Session = (*SimpleSession)(nil)
+
+// SendPrompt implements the provider.Session interface. It delegates to
+// SendPromptWithCfg using the session's stored config and adapts StreamCallbacks.
+func (s *SimpleSession) SendPrompt(ctx context.Context, prompt string, cb provider.StreamCallbacks) (*provider.SessionResult, error) {
+	// Wire StreamCallbacks into the existing OnOutput/OnToolCall hooks
+	if cb.OnText != nil {
+		prevOnOutput := s.onOutput
+		s.onOutput = func(text string) {
+			if prevOnOutput != nil {
+				prevOnOutput(text)
+			}
+			cb.OnText(text)
+		}
+		defer func() { s.onOutput = prevOnOutput }()
+	}
+	if cb.OnTool != nil {
+		prevOnToolCall := s.onToolCall
+		s.onToolCall = func(name string, args map[string]any) (string, error) {
+			cb.OnTool(name, args)
+			if prevOnToolCall != nil {
+				return prevOnToolCall(name, args)
+			}
+			return "", nil
+		}
+		defer func() { s.onToolCall = prevOnToolCall }()
+	}
+
+	cfg := s.lastCfg
+	err := s.SendPromptWithCfg(ctx, prompt, cfg)
+	if err != nil {
+		if errors.Is(err, ErrInterrupted) {
+			return nil, provider.ErrInterrupted
+		}
+		return nil, err
+	}
+
+	result := &provider.SessionResult{
+		SessionID: s.claudeSessionID,
+	}
+	if s.lastUsage != nil {
+		result.Usage = s.lastUsage
+		if cb.OnResult != nil {
+			cb.OnResult(s.lastUsage)
+		}
+	}
+	return result, nil
+}
+
 // higher-priority item (e.g. a P1 user message arriving during a background wake).
 var ErrInterrupted = errors.New("session interrupted by higher-priority item")
 
@@ -270,7 +320,7 @@ func loadManifestPlugins(statePath string) []string {
 		}
 		for _, p := range resolvePluginPathsFromLocalPath(localPath) {
 			if excludeSet[filepath.Base(p)] {
-				log.Printf("[plugins] skipping excluded plugin: %s", filepath.Base(p))
+				logging.Debug("plugins", "skipping excluded plugin: %s", filepath.Base(p))
 				continue
 			}
 			paths = append(paths, p)
@@ -325,7 +375,7 @@ func resolvedManifestPluginDirs(statePath string) []pluginDir {
 		}
 		for _, p := range resolvePluginPathsFromLocalPath(localPath) {
 			if excludeSet[filepath.Base(p)] {
-				log.Printf("[plugins] skipping excluded plugin: %s", filepath.Base(p))
+				logging.Debug("plugins", "skipping excluded plugin: %s", filepath.Base(p))
 				continue
 			}
 			dirs = append(dirs, pluginDir{Path: p, ToolGrants: e.ToolGrants})
@@ -495,13 +545,11 @@ func generateZettelLibraries(statePath string) {
 	log.Printf("[plugins] wrote zettel-libraries.yaml with %d libraries (%d manual)", len(libraries), len(manualEntries))
 }
 
-const (
-	// MaxContextTokens is the threshold for context tokens before auto-reset.
-	// Uses cache_read_input_tokens from the API which tells us how much session
-	// history is being read from cache. With a 200K context window, we reset
-	// at 150K to leave headroom for the current prompt + response.
-	MaxContextTokens = 150000
-)
+// MaxContextTokens is the threshold for context tokens before auto-reset.
+// Uses cache_read_input_tokens from the API which tells us how much session
+// history is being read from cache. With a 200K context window, we reset
+// at 150K to leave headroom for the current prompt + response.
+const MaxContextTokens = provider.MaxContextTokensDefault
 
 // SimpleSession manages a single persistent Claude session via the SDK
 type SimpleSession struct {
@@ -526,6 +574,9 @@ type SimpleSession struct {
 	// Usage from last completed prompt
 	lastUsage *SessionUsage
 
+	// Last ClaudeConfig used, stored for provider.Session.SendPrompt
+	lastCfg ClaudeConfig
+
 	// Claude-assigned session ID (from result event) — use this for --resume
 	claudeSessionID string
 
@@ -543,6 +594,11 @@ type SimpleSession struct {
 	// Callbacks
 	onToolCall func(name string, args map[string]any) (string, error)
 	onOutput   func(text string)
+
+	// Cached plugin scan results (computed once, reused per prompt)
+	localPlugins    []string
+	manifestPlugins []string
+	pluginsComputed bool
 }
 
 // NewSimpleSession creates a new simple session manager
@@ -555,6 +611,18 @@ func NewSimpleSession(statePath string) *SimpleSession {
 		memoryIDMap:      make(map[string]string),
 		statePath:        statePath,
 	}
+}
+
+// cachedPlugins returns the local and manifest plugin paths, computing them once
+// and caching the result for subsequent calls.
+func (s *SimpleSession) cachedPlugins() (localPlugins, manifestPlugins []string) {
+	if s.pluginsComputed {
+		return s.localPlugins, s.manifestPlugins
+	}
+	s.localPlugins = scanLocalPlugins(s.statePath)
+	s.manifestPlugins = loadManifestPlugins(s.statePath)
+	s.pluginsComputed = true
+	return s.localPlugins, s.manifestPlugins
 }
 
 // generateSessionUUID creates a random UUID v4
@@ -898,8 +966,9 @@ func (s *SimpleSession) OnOutput(fn func(text string)) {
 	s.onOutput = fn
 }
 
-// SendPrompt sends a prompt to Claude and blocks until the response is complete.
-func (s *SimpleSession) SendPrompt(ctx context.Context, prompt string, cfg ClaudeConfig) error {
+// SendPromptWithCfg sends a prompt to Claude with explicit config and blocks until the response is complete.
+func (s *SimpleSession) SendPromptWithCfg(ctx context.Context, prompt string, cfg ClaudeConfig) error {
+	s.lastCfg = cfg
 	// Check for reset pending before sending
 	if s.isResetPending() {
 		log.Printf("[simple-session] Reset pending, waiting for reset_session signal...")
@@ -949,10 +1018,11 @@ func (s *SimpleSession) SendPrompt(ctx context.Context, prompt string, cfg Claud
 	if len(cfg.AgentDefs) > 0 {
 		baseOpts = append(baseOpts, claudecode.WithAgents(cfg.AgentDefs))
 	}
-	for _, pluginPath := range scanLocalPlugins(s.statePath) {
+	localPlugins, manifestPlugins := s.cachedPlugins()
+	for _, pluginPath := range localPlugins {
 		baseOpts = append(baseOpts, claudecode.WithLocalPlugin(pluginPath))
 	}
-	for _, pluginPath := range loadManifestPlugins(s.statePath) {
+	for _, pluginPath := range manifestPlugins {
 		baseOpts = append(baseOpts, claudecode.WithLocalPlugin(pluginPath))
 	}
 	generateZettelLibraries(s.statePath)

@@ -24,11 +24,13 @@ import (
 	"github.com/shirou/gopsutil/v3/process"
 	"github.com/vthunder/bud2/internal/activity"
 	"github.com/vthunder/bud2/internal/budget"
+	"github.com/vthunder/bud2/internal/config"
 	"github.com/vthunder/bud2/internal/effectors"
 	"github.com/vthunder/bud2/internal/embedding"
 	"github.com/vthunder/bud2/internal/engram"
 	"github.com/vthunder/bud2/internal/eval"
 	"github.com/vthunder/bud2/internal/executive"
+	"github.com/vthunder/bud2/internal/executive/provider"
 	"github.com/vthunder/bud2/internal/focus"
 	"github.com/vthunder/bud2/internal/gtd"
 	"github.com/vthunder/bud2/internal/integrations/calendar"
@@ -138,6 +140,31 @@ func main() {
 		log.Println("[config] Loaded .env file")
 	}
 
+	// Load bud config from --config flag or BUD_CONFIG env var
+	var budCfg *config.BudConfig
+	configPath := os.Getenv("BUD_CONFIG")
+	for i, arg := range os.Args[1:] {
+		if arg == "--config" && i+1 < len(os.Args)-1 {
+			configPath = os.Args[i+2]
+			break
+		}
+		if strings.HasPrefix(arg, "--config=") {
+			configPath = strings.TrimPrefix(arg, "--config=")
+			break
+		}
+	}
+	if configPath != "" {
+		loaded, err := config.Load(configPath)
+		if err != nil {
+			log.Fatalf("[config] Failed to load config from %s: %v", configPath, err)
+		}
+		budCfg = loaded
+		log.Printf("[config] Loaded config from %s", configPath)
+	} else {
+		budCfg = config.DefaultConfig()
+		log.Println("[config] Using default config (no --config flag or BUD_CONFIG env)")
+	}
+
 	// Config from environment
 	discordToken := os.Getenv("DISCORD_TOKEN")
 	discordChannel := os.Getenv("DISCORD_CHANNEL_ID")
@@ -157,11 +184,71 @@ func main() {
 	if abs, err := filepath.Abs(statePath); err == nil {
 		statePath = abs
 	}
+	providerName, modelID, err := budCfg.ResolveModel("executive")
+	if err != nil {
+		log.Fatalf("[config] Failed to resolve executive model: %v", err)
+	}
+	log.Printf("[config] Executive provider: %s, model: %s", providerName, modelID)
 	claudeModel := os.Getenv("CLAUDE_MODEL")
+	if claudeModel == "" && providerName == "claude-code" {
+		claudeModel = modelID
+	}
+	if claudeModel == "" {
+		claudeModel = "claude-sonnet-4-20250514"
+	}
 	syntheticMode := os.Getenv("SYNTHETIC_MODE") == "true"
 	mcpHTTPPort := os.Getenv("MCP_HTTP_PORT")
 	if mcpHTTPPort == "" {
 		mcpHTTPPort = "8066" // Default MCP HTTP port
+	}
+
+	// Create the appropriate provider based on config
+	var executiveProvider provider.Provider
+	var agentProvider provider.Provider
+	switch providerName {
+	case "claude-code":
+		executiveProvider = provider.NewClaudeCodeProvider(claudeModel)
+		log.Printf("[config] Using claude-code provider with model %s", claudeModel)
+	case "opencode-serve":
+		apiKey, _ := budCfg.APIKey(providerName)
+		ocModel := modelID
+		ocBinPath := "" // will use PATH lookup
+		ocProvider := provider.NewOpenCodeServeProvider(ocBinPath, apiKey, ocModel, "")
+		if cw := budCfg.ContextWindow(providerName, modelID); cw > 0 {
+			ocProvider.WithContextWindow(cw)
+			log.Printf("[config] Using opencode-serve provider with model %s (context window: %d)", ocModel, cw)
+		} else {
+			log.Printf("[config] Using opencode-serve provider with model %s (default context window)", ocModel)
+		}
+		executiveProvider = ocProvider
+	default:
+		log.Fatalf("[config] Unsupported provider type: %s", providerName)
+	}
+
+	// Resolve agent provider (defaults to executive provider if not specified)
+	agentProviderName, agentModelID, err := budCfg.ResolveModel("agent")
+	if err != nil {
+		// No agent-specific config, use executive provider
+		agentProvider = executiveProvider
+	} else {
+		switch agentProviderName {
+		case "claude-code":
+			agentProvider = provider.NewClaudeCodeProvider(agentModelID)
+			log.Printf("[config] Using claude-code provider for agents with model %s", agentModelID)
+		case "opencode-serve":
+			apiKey, _ := budCfg.APIKey(agentProviderName)
+			ocModel := agentModelID
+			ocBinPath := ""
+			ocAgentProvider := provider.NewOpenCodeServeProvider(ocBinPath, apiKey, ocModel, "")
+			if cw := budCfg.ContextWindow(agentProviderName, agentModelID); cw > 0 {
+				ocAgentProvider.WithContextWindow(cw)
+			}
+			agentProvider = ocAgentProvider
+			log.Printf("[config] Using opencode-serve provider for agents with model %s", ocModel)
+		default:
+			log.Printf("[config] Warning: unsupported agent provider type %s, falling back to executive provider", agentProviderName)
+			agentProvider = executiveProvider
+		}
 	}
 
 	// Check for existing bud process (before creating state directory)
@@ -588,6 +675,10 @@ func main() {
 		reflexLog,
 		statePath, // Executive will construct paths like state/system/core.md from this
 		executive.ExecutiveV2Config{
+			Provider:                     executiveProvider,
+			AgentProvider:                agentProvider,
+			ProviderName:                 providerName,
+			ProviderConfig:               budCfg,
 			Model:                        claudeModel,
 			WorkDir:                      statePath, // Run Claude from state/ to pick up .mcp.json
 			MCPServerURL:                 fmt.Sprintf("http://127.0.0.1:%s/mcp", mcpHTTPPort),
