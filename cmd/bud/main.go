@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -46,8 +44,10 @@ import (
 	"github.com/vthunder/bud2/internal/reflex"
 	"github.com/vthunder/bud2/internal/senses"
 	"github.com/vthunder/bud2/internal/state"
+	"github.com/vthunder/bud2/internal/terminal"
+	"github.com/vthunder/bud2/internal/tmux"
 	"github.com/vthunder/bud2/internal/types"
-	tmuxwindow "github.com/vthunder/bud2/internal/zellij"
+	"github.com/vthunder/bud2/internal/zellij"
 )
 
 const Version = "2026-01-13-v2-focus-cutover"
@@ -165,6 +165,17 @@ func main() {
 	} else {
 		budCfg = config.DefaultConfig()
 		log.Println("[config] Using default config (no --config flag or BUD_CONFIG env)")
+	}
+
+	// Initialize terminal window manager based on config
+	var termManager terminal.Manager
+	switch budCfg.GetTerminalManager() {
+	case "tmux":
+		termManager = tmux.NewManager()
+		log.Println("[config] Using tmux terminal manager")
+	default:
+		termManager = zellij.NewManager()
+		log.Println("[config] Using zellij terminal manager")
 	}
 
 	// Config from environment
@@ -339,9 +350,9 @@ func main() {
 		defer profiling.Get().Close()
 	}
 
-	// Seed system from defaults if missing, and detect drift from seed updates.
-	// seedDrift lists files in seed/system/ that differ from state/system/.
-	seedDrift := seedSystem(statePath)
+	// Ensure state directory structure exists (but don't copy from defaults —
+	// ResolveFile/MergeDir handle the overlay at read time).
+	paths.EnsureStateSystemDirs(statePath)
 
 	// Generate .mcp.json in state/ directory for Claude MCP tools
 	if err := writeMCPConfig(statePath, mcpHTTPPort); err != nil {
@@ -367,26 +378,13 @@ func main() {
 	// Ollama embedding client - used by stateInspector and memoryJudge
 	ollamaClient := embedding.NewClient("", "") // defaults: localhost:11434, nomic-embed-text
 
-	// Ensure core.md exists in state/system directory (copy from seed if missing)
-	coreFile := filepath.Join(systemPath, "core.md")
-	if _, err := os.Stat(coreFile); os.IsNotExist(err) {
-		seedPath := "seed/system/core.md"
-		if data, err := os.ReadFile(seedPath); err == nil {
-			if err := os.WriteFile(coreFile, data, 0644); err != nil {
-				log.Printf("Warning: failed to create core.md: %v", err)
-			} else {
-				log.Printf("[main] Created %s from seed", coreFile)
-			}
-		} else {
-			log.Printf("Warning: failed to read core seed: %v", err)
-		}
-	}
+	// Load wakeup instructions (state override, then defaults)
+	wakeupContent, _ := paths.ResolveFile(statePath, "wakeup.md")
+	wakeupInstructions := wakeupContent
 
-	// Load wakeup instructions (from state dir, falls back to seed)
-	wakeupInstructions := loadFromStateOrSeed(statePath, "wakeup.md")
-
-	// Load startup instructions (from state dir, falls back to seed)
-	startupInstructions := loadFromStateOrSeed(statePath, "startup-instructions.md")
+	// Load startup instructions (state override, then defaults)
+	startupContent, _ := paths.ResolveFile(statePath, "startup-instructions.md")
+	startupInstructions := startupContent
 
 	// Initialize GTD store (always using JSON store - Things integration via MCP)
 	gtdStore := gtd.NewGTDStore(statePath)
@@ -545,7 +543,7 @@ func main() {
 			spawnFn, _, _, _, _, _, _, _, _ := exec.SubagentCallbacks()
 			id, logPath, err := spawnFn(task, systemPromptAppend, profile, workflowInstanceID, workflowStep, mcpURL)
 			if err == nil && logPath != "" {
-				go tmuxwindow.OpenSubagentWindow(id, logPath)
+				go termManager.OpenSubagentWindow(id, logPath)
 			}
 			return id, logPath, err
 		},
@@ -722,13 +720,10 @@ func main() {
 
 	// Open the single persistent executive log pane exactly once at startup.
 	// All wakes append to the same file; context clears do not open a new pane.
-	go tmuxwindow.EnsureExecWindow(filepath.Join(paths.LogDir(), "exec", "executive.log"))
+	go termManager.EnsureExecWindow(filepath.Join(paths.LogDir(), "exec", "executive.log"))
 
-	// Close tmux windows older than 24h every 2 hours.
-	tmuxwindow.StartCleanupLoop(2*time.Hour, 24*time.Hour)
-
-	// Wire reflex engine to attention system for proactive mode
-	reflexEngine.SetAttention(exec.GetAttention())
+	// Clean up old terminal panes/windows periodically.
+	termManager.StartCleanupLoop(2*time.Hour, 24*time.Hour)
 
 	// handleSignal processes a signal-type inbox message (budget tracking, session control)
 	handleSignal := func(msg *memory.InboxMessage) {
@@ -1383,28 +1378,6 @@ func main() {
 		})
 	}()
 
-	// If seed files have drifted from the installed state, create a separate
-	// focus item so the executive handles it with full context (not the minimal
-	// startup prompt). The user can decide whether to update their state files.
-	if len(seedDrift) > 0 {
-		go func() {
-			time.Sleep(5 * time.Second) // After startup impulse
-			driftList := strings.Join(seedDrift, "\n- ")
-			extra := map[string]any{
-				"seed_drift": seedDrift,
-			}
-			processInboxMessage(&memory.InboxMessage{
-				ID:        "seed-drift-" + time.Now().Format("20060102T150405"),
-				Type:      "message",
-				Content:   "Seed files have been updated since your state was last initialized. Updated files:\n- " + driftList + "\n\nUse talk_to_user to ask the user whether they want to update these files in their state directory.",
-				Priority:  4, // P4Background
-				Timestamp: time.Now(),
-				Status:    "pending",
-				Extra:     extra,
-			})
-		}()
-	}
-
 	// Start calendar sense (optional, independent of Discord)
 	var calendarSense *senses.CalendarSense
 	if calendarClient != nil {
@@ -1610,11 +1583,6 @@ func main() {
 		calendarSense.Stop()
 	}
 
-	// Persist state
-	if err := exec.GetQueue().Save(); err != nil {
-		log.Printf("Warning: failed to save focus queue: %v", err)
-	}
-
 	log.Println("[main] Goodbye!")
 }
 
@@ -1626,89 +1594,6 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
-}
-
-// seedSystem copies seed/system/ to state/system/ on first run (if state doesn't
-// exist) and detects drift (files that differ between seed and state) on subsequent
-// runs. Returns a list of relative paths that have drifted.
-func seedSystem(statePath string) []string {
-	systemDir := filepath.Join(statePath, "system")
-	seedDir := "seed/system"
-
-	// First run: copy entire seed/system/ → state/system/
-	if _, err := os.Stat(systemDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(systemDir, 0755); err != nil {
-			log.Printf("[main] Warning: failed to create system dir: %v", err)
-			return nil
-		}
-		if err := os.CopyFS(systemDir, os.DirFS(seedDir)); err != nil {
-			log.Printf("[main] Warning: failed to seed system dir: %v", err)
-			return nil
-		}
-		log.Printf("[main] Seeded %s from %s", systemDir, seedDir)
-		return nil
-	}
-
-	// Subsequent runs: detect drift between seed and state
-	var drifted []string
-	filepath.WalkDir(seedDir, func(seedPath string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		relPath, _ := filepath.Rel(seedDir, seedPath)
-		statePath := filepath.Join(systemDir, relPath)
-
-		seedHash, err := fileHash(seedPath)
-		if err != nil {
-			return nil
-		}
-
-		stateHash, err := fileHash(statePath)
-		if err != nil {
-			// File exists in seed but not in state — it was added in a new release
-			drifted = append(drifted, relPath)
-			return nil
-		}
-
-		if seedHash != stateHash {
-			drifted = append(drifted, relPath)
-		}
-		return nil
-	})
-
-	return drifted
-}
-
-// fileHash returns the SHA-256 hash of a file, or an error if it doesn't exist.
-func fileHash(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	h := sha256.Sum256(data)
-	return hex.EncodeToString(h[:]), nil
-}
-
-// loadFromStateOrSeed loads a file from state/system/ if it exists,
-// otherwise falls back to seed/system/. This allows users to customize
-// files in their state dir while still getting defaults from seed.
-func loadFromStateOrSeed(statePath, filename string) string {
-	// Try state dir first (allows user customization)
-	stateFile := filepath.Join(statePath, "system", filename)
-	if data, err := os.ReadFile(stateFile); err == nil {
-		log.Printf("[main] Loaded %s from state (%d bytes)", filename, len(data))
-		return string(data)
-	}
-
-	// Fall back to seed
-	seedFile := filepath.Join("seed", "system", filename)
-	if data, err := os.ReadFile(seedFile); err == nil {
-		log.Printf("[main] Loaded %s from seed (%d bytes)", filename, len(data))
-		return string(data)
-	}
-
-	log.Printf("[main] No %s found", filename)
-	return ""
 }
 
 // writeMCPConfig writes .mcp.json to the state directory with HTTP MCP server configuration

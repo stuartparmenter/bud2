@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -180,35 +179,17 @@ func NewExecutiveV2(
 		}
 	}
 
-	// Load core identity from state/system/core.md
-	// If it doesn't exist, copy from seed/system/core.md
-	coreFile := filepath.Join(statePath, "system", "core.md")
-	coreContent, err := os.ReadFile(coreFile)
-	if os.IsNotExist(err) {
-		// Try to copy from seed
-		seedFile := filepath.Join(filepath.Dir(statePath), "seed", "system", "core.md")
-		seedContent, seedErr := os.ReadFile(seedFile)
-		if seedErr != nil {
-			log.Printf("[executive-v2] Warning: core.md not found in state or seed: state=%v seed=%v", err, seedErr)
-		} else {
-			// Ensure directory exists
-			if mkdirErr := os.MkdirAll(filepath.Dir(coreFile), 0755); mkdirErr != nil {
-				log.Printf("[executive-v2] Warning: failed to create directory for core.md: %v", mkdirErr)
-			} else if writeErr := os.WriteFile(coreFile, seedContent, 0644); writeErr != nil {
-				log.Printf("[executive-v2] Warning: failed to write core.md: %v", writeErr)
-			} else {
-				coreContent = seedContent
-				log.Printf("[executive-v2] Copied core.md from seed (%d bytes)", len(seedContent))
-			}
+	// Load core identity: state override, then defaults
+	coreContent, fromState := paths.ResolveFile(statePath, "core.md")
+	if coreContent != "" {
+		exec.coreIdentity = coreContent
+		source := "defaults"
+		if fromState {
+			source = "state"
 		}
-	} else if err != nil {
-		log.Printf("[executive-v2] Warning: failed to load core identity from %s: %v", coreFile, err)
+		log.Printf("[executive-v2] Loaded core identity from %s (%d bytes)", source, len(coreContent))
 	} else {
-		log.Printf("[executive-v2] Loaded core identity from %s (%d bytes)", coreFile, len(coreContent))
-	}
-
-	if len(coreContent) > 0 {
-		exec.coreIdentity = string(coreContent)
+		log.Printf("[executive-v2] Warning: core.md not found in state or defaults")
 	}
 
 	return exec
@@ -622,30 +603,6 @@ func (e *ExecutiveV2) ResetSession() {
 // AddPending adds an item to the pending queue
 func (e *ExecutiveV2) AddPending(item *focus.PendingItem) error {
 	return e.queue.Add(item)
-}
-
-// ProcessNext processes the next item in the attention queue
-// Returns true if an item was processed, false if queue was empty
-func (e *ExecutiveV2) ProcessNext(ctx context.Context) (bool, error) {
-	// Select next item from queue
-	if pending := e.queue.PopHighest(); pending != nil {
-		e.attention.AddPending(pending)
-	}
-	item := e.attention.SelectNext()
-	if item == nil {
-		return false, nil
-	}
-
-	// Set as current focus
-	e.attention.Focus(item)
-	defer e.attention.Complete()
-
-	// Process the item
-	if err := e.processItem(ctx, []*focus.PendingItem{item}); err != nil {
-		return true, err
-	}
-
-	return true, nil
 }
 
 // ProcessNextP1 processes all queued P0/P1 items (user input, critical alerts) as a batch.
@@ -1942,11 +1899,6 @@ func (e *ExecutiveV2) GetSession() *SimpleSession {
 	return e.session
 }
 
-// GetAttention returns the attention system
-func (e *ExecutiveV2) GetAttention() *focus.Attention {
-	return e.attention
-}
-
 // GetQueue returns the pending queue
 func (e *ExecutiveV2) GetQueue() *focus.Queue {
 	return e.queue
@@ -1969,11 +1921,6 @@ func (e *ExecutiveV2) TodayThinkingMinutes() float64 {
 func (e *ExecutiveV2) Stop() error {
 	// Cancel any active session so the subprocess is killed cleanly
 	e.InterruptCurrentSession()
-
-	// Save queue state
-	if err := e.queue.Save(); err != nil {
-		log.Printf("[executive-v2] Warning: failed to save queue: %v", err)
-	}
 
 	// Close sessions
 	if e.providerSession != nil {

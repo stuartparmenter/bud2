@@ -18,13 +18,9 @@ import (
 	"github.com/itchyny/gojq"
 	"github.com/vthunder/bud2/internal/gtd"
 	"github.com/vthunder/bud2/internal/integrations/calendar"
+	"github.com/vthunder/bud2/internal/paths"
 	"gopkg.in/yaml.v3"
 )
-
-// AttentionChecker is the interface for checking attention state
-type AttentionChecker interface {
-	IsAttending(domain string) bool
-}
 
 // ToolCaller is the interface for calling MCP tools from reflex pipelines
 type ToolCaller interface {
@@ -36,14 +32,12 @@ type Engine struct {
 	reflexes    map[string]*Reflex
 	actions     *ActionRegistry
 	reflexDir   string
+	statePath   string // State dir for resolving merged paths
 	mu          sync.RWMutex
 	fileModTime map[string]time.Time // Track file mod times for hot reload
 
 	// Default channel for notifications (used when no channel_id in context)
 	defaultChannel string
-
-	// Attention system for proactive mode
-	attention AttentionChecker
 
 	// Callbacks for integration
 	onReply            func(channelID, message string) error
@@ -72,6 +66,7 @@ func NewEngine(statePath string) *Engine {
 		reflexes:    make(map[string]*Reflex),
 		actions:     NewActionRegistry(),
 		reflexDir:   filepath.Join(statePath, "system", "reflexes"),
+		statePath:   statePath,
 		fileModTime: make(map[string]time.Time),
 	}
 	e.createGTDActions()
@@ -127,44 +122,18 @@ func (e *Engine) SetToolCaller(tc ToolCaller) {
 	e.toolCaller = tc
 }
 
-// SetAttention sets the attention checker for proactive mode
-// When attention is actively focusing on a domain, reflexes for that domain are bypassed
-func (e *Engine) SetAttention(attention AttentionChecker) {
-	e.attention = attention
-}
-
-// Load loads all reflexes from the reflexes directory
+// Load loads all reflexes from the reflexes directory, merging state and defaults
 func (e *Engine) Load() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	// Check if directory exists
-	dirExists := true
-	if _, err := os.Stat(e.reflexDir); os.IsNotExist(err) {
-		dirExists = false
-	}
-
-	// Ensure directory exists
+	// Ensure state reflexes directory exists for user overrides
 	if err := os.MkdirAll(e.reflexDir, 0755); err != nil {
 		return fmt.Errorf("failed to create reflexes dir: %w", err)
 	}
 
-	// If directory was just created, seed from seed/system/reflexes/
-	if !dirExists {
-		e.seedFromDefaults()
-	}
-
-	// Find all YAML files
-	files, err := filepath.Glob(filepath.Join(e.reflexDir, "*.yaml"))
-	if err != nil {
-		return fmt.Errorf("failed to glob reflexes: %w", err)
-	}
-
-	yamlFiles, err := filepath.Glob(filepath.Join(e.reflexDir, "*.yml"))
-	if err != nil {
-		return fmt.Errorf("failed to glob reflexes: %w", err)
-	}
-	files = append(files, yamlFiles...)
+	// Find all YAML files from both state-defaults and state (state overrides defaults)
+	files := paths.MergeDir(e.statePath, "reflexes", []string{".yaml", ".yml"})
 
 	// Load each file
 	e.reflexes = make(map[string]*Reflex)
@@ -176,11 +145,13 @@ func (e *Engine) Load() error {
 			continue
 		}
 		e.reflexes[reflex.Name] = reflex
-		// Track mod time for hot reload
-		if info, err := os.Stat(file); err == nil {
-			e.fileModTime[file] = info.ModTime()
+		// Track mod time for hot reload (only for state dir files)
+		if strings.HasPrefix(file, e.reflexDir) {
+			if info, err := os.Stat(file); err == nil {
+				e.fileModTime[file] = info.ModTime()
+			}
 		}
-		log.Printf("[reflex] Loaded: %s", reflex.Name)
+		log.Printf("[reflex] Loaded: %s (from %s)", reflex.Name, filepath.Base(filepath.Dir(file)))
 	}
 
 	log.Printf("[reflex] Loaded %d reflexes", len(e.reflexes))
@@ -199,13 +170,15 @@ func (e *Engine) CheckForUpdates() int {
 
 	reloaded := 0
 
-	// Find all YAML files
-	files, _ := filepath.Glob(filepath.Join(e.reflexDir, "*.yaml"))
-	yamlFiles, _ := filepath.Glob(filepath.Join(e.reflexDir, "*.yml"))
-	files = append(files, yamlFiles...)
+	// Find all YAML files (merged view)
+	files := paths.MergeDir(e.statePath, "reflexes", []string{".yaml", ".yml"})
 
 	// Check for new or modified files
 	for _, file := range files {
+		// Only hot-reload files in the state dir (defaults are read-only)
+		if !strings.HasPrefix(file, e.reflexDir) {
+			continue
+		}
 		info, err := os.Stat(file)
 		if err != nil {
 			continue
@@ -272,37 +245,6 @@ func (e *Engine) loadReflexFile(path string) (*Reflex, error) {
 	}
 
 	return &reflex, nil
-}
-
-// seedFromDefaults copies seed reflexes to the reflexes directory
-func (e *Engine) seedFromDefaults() {
-	seedDir := "seed/system/reflexes"
-	files, err := filepath.Glob(filepath.Join(seedDir, "*.yaml"))
-	if err != nil {
-		log.Printf("[reflex] Failed to glob seed reflexes: %v", err)
-		return
-	}
-
-	ymlFiles, err := filepath.Glob(filepath.Join(seedDir, "*.yml"))
-	if err == nil {
-		files = append(files, ymlFiles...)
-	}
-
-	for _, src := range files {
-		data, err := os.ReadFile(src)
-		if err != nil {
-			log.Printf("[reflex] Failed to read seed %s: %v", src, err)
-			continue
-		}
-
-		dst := filepath.Join(e.reflexDir, filepath.Base(src))
-		if err := os.WriteFile(dst, data, 0644); err != nil {
-			log.Printf("[reflex] Failed to write %s: %v", dst, err)
-			continue
-		}
-
-		log.Printf("[reflex] Seeded: %s", filepath.Base(src))
-	}
 }
 
 // SaveReflex saves a reflex to a YAML file
@@ -703,26 +645,6 @@ Message: %s`, intentList, content)
 // Process attempts to match and execute reflexes for a percept
 // Returns true if any reflex fired (and executive should be skipped)
 func (e *Engine) Process(ctx context.Context, source, typ, content string, data map[string]any) (bool, []*ReflexResult) {
-	// Proactive mode check: if attention is actively focusing on this source/domain,
-	// bypass reflexes and route directly to executive
-	if e.attention != nil {
-		// Check by source (e.g., "discord", "calendar")
-		if e.attention.IsAttending(source) {
-			log.Printf("[reflex] Bypassing reflexes: attention is attending to %q", source)
-			return false, nil
-		}
-		// Check by type (e.g., "gtd", "message")
-		if e.attention.IsAttending(typ) {
-			log.Printf("[reflex] Bypassing reflexes: attention is attending to %q", typ)
-			return false, nil
-		}
-		// Check for "all" domain (executive wants everything)
-		if e.attention.IsAttending("all") {
-			log.Printf("[reflex] Bypassing reflexes: attention is attending to all")
-			return false, nil
-		}
-	}
-
 	matches := e.Match(source, typ, content)
 	if len(matches) == 0 {
 		return false, nil
