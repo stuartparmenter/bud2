@@ -129,11 +129,11 @@ type ExecutiveV2Config struct {
 	// Recommended: 8-10 minutes to enforce coordinator-style wake sessions.
 	MaxAutonomousSessionDuration time.Duration
 
-	// WakeupInstructions is the content of seed/wakeup.md, injected into
+	// WakeupInstructions is the content of wakeup.md, injected into
 	// autonomous wake prompts to give Claude concrete work to do.
 	WakeupInstructions string
 
-	// StartupInstructions is the content of seed/startup-instructions.md,
+	// StartupInstructions is the content of startup-instructions.md,
 	// injected into startup prompts so Claude knows what to do on boot.
 	StartupInstructions string
 
@@ -1878,6 +1878,16 @@ func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 				prompt.WriteString("## Previous Session Note\n")
 				prompt.WriteString(note)
 				prompt.WriteString("\n\n")
+			}
+			// Surface seed drift — files that differ between the shipped seed
+			// and the user's state dir, indicating an update is available.
+			if driftFiles, ok := bundle.CurrentFocus.Data["seed_drift"].([]string); ok && len(driftFiles) > 0 {
+				prompt.WriteString("## Seed Update Available\n")
+				prompt.WriteString("The following seed files have been updated since your state was initialized:\n")
+				for _, f := range driftFiles {
+					prompt.WriteString(fmt.Sprintf("- `%s`\n", f))
+				}
+				prompt.WriteString("\nTo update, run: `seed-sync update`\nOr to see diffs: `seed-sync diff`\n\n")
 			}
 		}
 	}

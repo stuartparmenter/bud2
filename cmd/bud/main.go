@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -337,10 +339,9 @@ func main() {
 		defer profiling.Get().Close()
 	}
 
-	// Seed system directories from defaults if missing
-	for _, dir := range []string{"guides", "workflows", "plugins"} {
-		seedSystemDir(statePath, dir)
-	}
+	// Seed system from defaults if missing, and detect drift from seed updates.
+	// seedDrift lists files in seed/system/ that differ from state/system/.
+	seedDrift := seedSystem(statePath)
 
 	// Generate .mcp.json in state/ directory for Claude MCP tools
 	if err := writeMCPConfig(statePath, mcpHTTPPort); err != nil {
@@ -369,7 +370,7 @@ func main() {
 	// Ensure core.md exists in state/system directory (copy from seed if missing)
 	coreFile := filepath.Join(systemPath, "core.md")
 	if _, err := os.Stat(coreFile); os.IsNotExist(err) {
-		seedPath := "seed/core.md"
+		seedPath := "seed/system/core.md"
 		if data, err := os.ReadFile(seedPath); err == nil {
 			if err := os.WriteFile(coreFile, data, 0644); err != nil {
 				log.Printf("Warning: failed to create core.md: %v", err)
@@ -381,23 +382,11 @@ func main() {
 		}
 	}
 
-	// Load wakeup instructions for autonomous wake prompts
-	wakeupInstructions := ""
-	if data, err := os.ReadFile("seed/wakeup.md"); err == nil {
-		wakeupInstructions = string(data)
-		log.Printf("[main] Loaded wakeup instructions (%d bytes)", len(data))
-	} else {
-		log.Printf("[main] No wakeup.md found (autonomous wakes will use default prompt)")
-	}
+	// Load wakeup instructions (from state dir, falls back to seed)
+	wakeupInstructions := loadFromStateOrSeed(statePath, "wakeup.md")
 
-	// Load startup instructions for post-deploy startup prompts
-	startupInstructions := ""
-	if data, err := os.ReadFile("seed/startup-instructions.md"); err == nil {
-		startupInstructions = string(data)
-		log.Printf("[main] Loaded startup instructions (%d bytes)", len(data))
-	} else {
-		log.Printf("[main] No startup-instructions.md found (startup will use bare prompt)")
-	}
+	// Load startup instructions (from state dir, falls back to seed)
+	startupInstructions := loadFromStateOrSeed(statePath, "startup-instructions.md")
 
 	// Initialize GTD store (always using JSON store - Things integration via MCP)
 	gtdStore := gtd.NewGTDStore(statePath)
@@ -1382,6 +1371,9 @@ func main() {
 		if note := readAutonomousHandoff(statePath); note != "" {
 			extra["autonomous_handoff"] = note
 		}
+		if len(seedDrift) > 0 {
+			extra["seed_drift"] = seedDrift
+		}
 		processInboxMessage(&memory.InboxMessage{
 			ID:        "startup-" + time.Now().Format("20060102T150405"),
 			Type:      "impulse",
@@ -1617,31 +1609,87 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-// seedSystemDir copies seed/{dirName}/ to state/system/{dirName}/ if the destination
-// directory doesn't already exist. Handles both flat and nested directory structures.
-func seedSystemDir(statePath, dirName string) {
-	dstDir := filepath.Join(statePath, "system", dirName)
+// seedSystem copies seed/system/ to state/system/ on first run (if state doesn't
+// exist) and detects drift (files that differ between seed and state) on subsequent
+// runs. Returns a list of relative paths that have drifted.
+func seedSystem(statePath string) []string {
+	systemDir := filepath.Join(statePath, "system")
+	seedDir := "seed/system"
 
-	if _, err := os.Stat(dstDir); !os.IsNotExist(err) {
-		return // already seeded
+	// First run: copy entire seed/system/ → state/system/
+	if _, err := os.Stat(systemDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(systemDir, 0755); err != nil {
+			log.Printf("[main] Warning: failed to create system dir: %v", err)
+			return nil
+		}
+		if err := os.CopyFS(systemDir, os.DirFS(seedDir)); err != nil {
+			log.Printf("[main] Warning: failed to seed system dir: %v", err)
+			return nil
+		}
+		log.Printf("[main] Seeded %s from %s", systemDir, seedDir)
+		return nil
 	}
 
-	srcDir := filepath.Join("seed", dirName)
-	if _, err := os.Stat(srcDir); os.IsNotExist(err) {
-		return // no seed source, skip silently
+	// Subsequent runs: detect drift between seed and state
+	var drifted []string
+	filepath.WalkDir(seedDir, func(seedPath string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		relPath, _ := filepath.Rel(seedDir, seedPath)
+		statePath := filepath.Join(systemDir, relPath)
+
+		seedHash, err := fileHash(seedPath)
+		if err != nil {
+			return nil
+		}
+
+		stateHash, err := fileHash(statePath)
+		if err != nil {
+			// File exists in seed but not in state — it was added in a new release
+			drifted = append(drifted, relPath)
+			return nil
+		}
+
+		if seedHash != stateHash {
+			drifted = append(drifted, relPath)
+		}
+		return nil
+	})
+
+	return drifted
+}
+
+// fileHash returns the SHA-256 hash of a file, or an error if it doesn't exist.
+func fileHash(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:]), nil
+}
+
+// loadFromStateOrSeed loads a file from state/system/ if it exists,
+// otherwise falls back to seed/system/. This allows users to customize
+// files in their state dir while still getting defaults from seed.
+func loadFromStateOrSeed(statePath, filename string) string {
+	// Try state dir first (allows user customization)
+	stateFile := filepath.Join(statePath, "system", filename)
+	if data, err := os.ReadFile(stateFile); err == nil {
+		log.Printf("[main] Loaded %s from state (%d bytes)", filename, len(data))
+		return string(data)
 	}
 
-	if err := os.MkdirAll(dstDir, 0755); err != nil {
-		log.Printf("[main] Warning: failed to create %s dir: %v", dirName, err)
-		return
+	// Fall back to seed
+	seedFile := filepath.Join("seed", "system", filename)
+	if data, err := os.ReadFile(seedFile); err == nil {
+		log.Printf("[main] Loaded %s from seed (%d bytes)", filename, len(data))
+		return string(data)
 	}
 
-	if err := os.CopyFS(dstDir, os.DirFS(srcDir)); err != nil {
-		log.Printf("[main] Warning: failed to seed %s: %v", dirName, err)
-		return
-	}
-
-	log.Printf("[main] Seeded system/%s from seed/%s", dirName, dirName)
+	log.Printf("[main] No %s found", filename)
+	return ""
 }
 
 // writeMCPConfig writes .mcp.json to the state directory with HTTP MCP server configuration

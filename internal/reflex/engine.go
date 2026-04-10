@@ -149,7 +149,7 @@ func (e *Engine) Load() error {
 		return fmt.Errorf("failed to create reflexes dir: %w", err)
 	}
 
-	// If directory was just created, seed from seed/reflexes/
+	// If directory was just created, seed from seed/system/reflexes/
 	if !dirExists {
 		e.seedFromDefaults()
 	}
@@ -276,7 +276,7 @@ func (e *Engine) loadReflexFile(path string) (*Reflex, error) {
 
 // seedFromDefaults copies seed reflexes to the reflexes directory
 func (e *Engine) seedFromDefaults() {
-	seedDir := "seed/reflexes"
+	seedDir := "seed/system/reflexes"
 	files, err := filepath.Glob(filepath.Join(seedDir, "*.yaml"))
 	if err != nil {
 		log.Printf("[reflex] Failed to glob seed reflexes: %v", err)
