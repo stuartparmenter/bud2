@@ -560,16 +560,8 @@ type SimpleSession struct {
 	statePath        string    // Path to state directory for reset coordination
 
 	// Track what's been sent to this session
-	seenItemIDs   map[string]bool
 	seenMemoryIDs map[string]bool   // Track which memory traces have been sent
 	memoryIDMap   map[string]string // Map trace_id -> short hash display ID (tr_xxxxx)
-
-	// Track conversation buffer sync to avoid re-sending already-seen context
-	// Only buffer entries after this time need to be sent
-	lastBufferSync time.Time
-
-	// Track number of user messages for reset threshold
-	userMessageCount int
 
 	// Usage from last completed prompt
 	lastUsage *SessionUsage
@@ -606,7 +598,6 @@ func NewSimpleSession(statePath string) *SimpleSession {
 	return &SimpleSession{
 		sessionID:        generateSessionUUID(),
 		sessionStartTime: time.Now(),
-		seenItemIDs:      make(map[string]bool),
 		seenMemoryIDs:    make(map[string]bool),
 		memoryIDMap:      make(map[string]string),
 		statePath:        statePath,
@@ -763,18 +754,6 @@ func (s *SimpleSession) SessionStartTime() time.Time {
 	return s.sessionStartTime
 }
 
-// HasSeenItem returns true if an item has been sent to this session
-func (s *SimpleSession) HasSeenItem(id string) bool {
-	return s.seenItemIDs[id]
-}
-
-// MarkItemsSeen marks items as having been sent to Claude
-func (s *SimpleSession) MarkItemsSeen(ids []string) {
-	for _, id := range ids {
-		s.seenItemIDs[id] = true
-	}
-}
-
 // HasSeenMemory returns true if a memory trace has been sent to this session
 func (s *SimpleSession) HasSeenMemory(id string) bool {
 	return s.seenMemoryIDs[id]
@@ -853,34 +832,6 @@ func (s *SimpleSession) ResolveMemoryEval(eval map[string]any) map[string]int {
 	return resolved
 }
 
-// LastBufferSync returns when the buffer was last synced to this session
-func (s *SimpleSession) LastBufferSync() time.Time {
-	return s.lastBufferSync
-}
-
-// UpdateBufferSync updates the buffer sync timestamp
-// Call this after sending a prompt that included buffer content
-func (s *SimpleSession) UpdateBufferSync(t time.Time) {
-	s.lastBufferSync = t
-}
-
-// IncrementUserMessages increments the user message counter
-// Call this when processing a user message (not autonomous wakes)
-func (s *SimpleSession) IncrementUserMessages() {
-	s.userMessageCount++
-}
-
-// UserMessageCount returns the number of user messages in this session
-func (s *SimpleSession) UserMessageCount() int {
-	return s.userMessageCount
-}
-
-// IsFirstPrompt returns true if no prompts have been sent to this session
-// Used to determine if core identity and full buffer history should be included
-func (s *SimpleSession) IsFirstPrompt() bool {
-	return len(s.seenItemIDs) == 0 && s.lastBufferSync.IsZero()
-}
-
 // PrepareNewSession rotates the session ID and clears per-prompt state so the
 // caller can record the correct ID with the session tracker before sending.
 // Must be called before StartSession + SendPrompt.
@@ -897,10 +848,9 @@ func (s *SimpleSession) PrepareNewSession() {
 
 // PrepareForResume prepares for a new turn in an ongoing Claude session.
 // Unlike PrepareNewSession, it preserves claudeSessionID (for --resume),
-// seenMemoryIDs (to avoid re-injecting seen memories), and lastBufferSync
-// (to only send new episodes). It clears memoryIDMap so memory self-eval
-// display IDs are fresh for this turn, and sets isResuming so buildPrompt
-// skips static context already present in the session history.
+// seenMemoryIDs (to avoid re-injecting seen memories). It clears memoryIDMap
+// so memory self-eval display IDs are fresh for this turn, and sets isResuming
+// so buildPrompt skips static context already present in the session history.
 //
 // Call this instead of PrepareNewSession when ClaudeSessionID() is non-empty
 // and ShouldReset() is false.
@@ -912,7 +862,6 @@ func (s *SimpleSession) PrepareForResume() {
 	s.memoryIDMap = make(map[string]string) // Fresh display IDs for memory eval
 	// claudeSessionID preserved — used for --resume flag
 	// seenMemoryIDs preserved — avoids re-injecting already-sent memories
-	// lastBufferSync preserved — only sends new conversation episodes
 	s.isResuming = true
 }
 
@@ -1211,13 +1160,10 @@ func (s *SimpleSession) Reset() {
 	defer s.mu.Unlock()
 	s.sessionID = generateSessionUUID()
 	s.sessionStartTime = time.Now()
-	s.seenItemIDs = make(map[string]bool)
 	s.seenMemoryIDs = make(map[string]bool)
 	s.memoryIDMap = make(map[string]string)
-	s.lastBufferSync = time.Time{} // Reset buffer sync so full buffer is sent on first prompt
-	s.userMessageCount = 0         // Reset message counter
-	s.lastUsage = nil              // Clear usage data
-	s.claudeSessionID = ""         // Force new session (no resume)
+	s.lastUsage = nil      // Clear usage data
+	s.claudeSessionID = "" // Force new session (no resume)
 	s.isResuming = false
 	s.clearResetPending() // Clear the pending flag so new sessions can start
 	log.Printf("[simple-session] Session reset complete, new session ID: %s", s.sessionID)

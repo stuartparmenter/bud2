@@ -102,8 +102,8 @@ func (e *TestEffector) SetMaxRetryDuration(d time.Duration) {
 	// No-op - test mode doesn't retry
 }
 
-// ClearOutput clears the test output file (useful for test setup)
-func (e *TestEffector) ClearOutput() error {
+// clearOutput clears the test output file (useful for test setup)
+func (e *TestEffector) clearOutput() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 

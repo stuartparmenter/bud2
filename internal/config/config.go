@@ -9,8 +9,9 @@ import (
 )
 
 type BudConfig struct {
-	Providers map[string]ProviderConfig `yaml:"providers"`
-	Models    map[string]string         `yaml:"models"`
+	Providers       map[string]ProviderConfig `yaml:"providers"`
+	Models          map[string]string         `yaml:"models"`
+	TerminalManager string                    `yaml:"terminal_manager,omitempty"`
 }
 
 type ProviderConfig struct {
@@ -71,7 +72,17 @@ func (c *BudConfig) Validate() error {
 			return fmt.Errorf("models.%s: references unknown provider %q", role, providerName)
 		}
 	}
+	if c.TerminalManager != "" && c.TerminalManager != "zellij" && c.TerminalManager != "tmux" {
+		return fmt.Errorf("terminal_manager: must be \"zellij\" or \"tmux\", got %q", c.TerminalManager)
+	}
 	return nil
+}
+
+func (c *BudConfig) GetTerminalManager() string {
+	if c.TerminalManager == "" {
+		return "zellij"
+	}
+	return c.TerminalManager
 }
 
 func (c *BudConfig) ResolveModel(role string) (providerName, modelID string, err error) {

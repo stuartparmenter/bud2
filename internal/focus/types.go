@@ -18,46 +18,27 @@ const (
 // PendingItem represents something waiting for attention
 type PendingItem struct {
 	ID        string         `json:"id"`
-	Type      string         `json:"type"`      // user_input, due_task, reminder, idea, etc.
+	Type      string         `json:"type"` // user_input, due_task, reminder, idea, etc.
 	Priority  Priority       `json:"priority"`
-	Salience  float64        `json:"salience"`  // 0.0-1.0 computed importance
-	Source    string         `json:"source"`    // discord, calendar, internal, etc.
-	Content   string         `json:"content"`   // main content
+	Salience  float64        `json:"salience"` // 0.0-1.0 computed importance
+	Source    string         `json:"source"`   // discord, calendar, internal, etc.
+	Content   string         `json:"content"`  // main content
 	ChannelID string         `json:"channel_id,omitempty"`
 	AuthorID  string         `json:"author_id,omitempty"`
 	Timestamp time.Time      `json:"timestamp"`
 	Data      map[string]any `json:"data,omitempty"` // additional context
 }
 
-// Mode defines the attention mode for a domain
-type Mode struct {
-	Domain    string    `json:"domain"`     // "gtd", "calendar", "all", specific channel
-	Action    string    `json:"action"`     // "bypass_reflex", "debug", "practice"
-	SetBy     string    `json:"set_by"`     // "executive", "user"
-	ExpiresAt time.Time `json:"expires_at"` // when mode expires
-	Reason    string    `json:"reason,omitempty"`
-}
-
-// IsExpired returns true if the mode has expired
-func (m *Mode) IsExpired() bool {
-	if m.ExpiresAt.IsZero() {
-		return false
-	}
-	return time.Now().After(m.ExpiresAt)
-}
-
 // FocusState represents the current attention state
 type FocusState struct {
 	CurrentItem *PendingItem   `json:"current_item,omitempty"` // What we're focused on
 	Suspended   []*PendingItem `json:"suspended,omitempty"`    // Stack of interrupted items
-	Modes       []*Mode        `json:"modes,omitempty"`        // Active attention modes
-	Arousal     float64        `json:"arousal"`                // 0.0-1.0 overall activity level
 }
 
 // ContextBundle represents assembled context for the executive
 type ContextBundle struct {
 	CurrentFocus       *PendingItem
-	AdditionalFocus    []*PendingItem    // Additional messages in the same batch (batched P1 handling)
+	AdditionalFocus    []*PendingItem // Additional messages in the same batch (batched P1 handling)
 	Suspended          []*PendingItem
 	BufferContent      string            // Conversation buffer for current scope
 	HasAuthorizations  bool              // True if buffer contains historical authorizations

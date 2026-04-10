@@ -1,8 +1,6 @@
 package budget
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -50,37 +48,6 @@ func TestSessionTracking(t *testing.T) {
 
 	t.Logf("Session completed in %.3f seconds", session.DurationSec)
 	t.Logf("Today's thinking minutes: %.3f", tracker.TodayThinkingMinutes())
-}
-
-func TestSignalProcessor(t *testing.T) {
-	statePath := t.TempDir()
-
-	// Create tracker and processor
-	tracker := NewSessionTracker(statePath)
-	processor := NewSignalProcessor(statePath, tracker)
-
-	// Start a session
-	tracker.StartSession("session-1", "thread-1")
-
-	// Write a signal file
-	signalData := `{"type":"session_done","session_id":"session-1","summary":"Test done","timestamp":"2026-01-06T12:00:00Z"}`
-	queuesPath := filepath.Join(statePath, "system", "queues")
-	os.MkdirAll(queuesPath, 0755)
-	signalsPath := filepath.Join(queuesPath, "signals.jsonl")
-	if err := os.WriteFile(signalsPath, []byte(signalData+"\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Process signals
-	n := processor.ProcessSignals()
-	if n != 1 {
-		t.Errorf("Expected 1 signal processed, got %d", n)
-	}
-
-	// Session should be completed
-	if tracker.HasActiveSessions() {
-		t.Error("Expected session to be completed after signal")
-	}
 }
 
 func TestThinkingBudget(t *testing.T) {

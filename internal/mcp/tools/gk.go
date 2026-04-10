@@ -13,8 +13,6 @@ var domainProp = mcp.PropDef{
 	Description: `Optional. Domain path for the knowledge graph DB. "/" = root state DB, "/projects/foo" = project DB. Defaults to the session's registered domain (injected automatically by the MCP server).`,
 }
 
-func gkRequired(fields ...string) []string { return fields }
-
 // RegisterGKTools registers all 27 GK knowledge-graph tools with the MCP server.
 // Each tool adds an optional "domain" parameter for multi-DB routing.
 // The GKTool flag causes the HTTP handler to inject the session's default domain
@@ -29,7 +27,7 @@ func RegisterGKTools(server *mcp.Server, deps *Dependencies) {
 			"entities": {Type: "array", Description: "Array of entity objects: [{name: string, type: string, properties?: object, confidence?: number, source?: string}]"},
 			"domain":   domainProp,
 		},
-		Required: gkRequired("entities"),
+		Required: []string{"entities"},
 	}, func(ctx any, args map[string]any) (string, error) {
 		return gkForward(deps, "add_entities", args)
 	})
@@ -41,7 +39,7 @@ func RegisterGKTools(server *mcp.Server, deps *Dependencies) {
 			"relationships": {Type: "array", Description: "Array of relationship objects: [{from_name: string, to_name: string, type: string, properties?: object, confidence?: number, source?: string}]"},
 			"domain":        domainProp,
 		},
-		Required: gkRequired("relationships"),
+		Required: []string{"relationships"},
 	}, func(ctx any, args map[string]any) (string, error) {
 		return gkForward(deps, "add_relationships", args)
 	})
@@ -53,7 +51,7 @@ func RegisterGKTools(server *mcp.Server, deps *Dependencies) {
 			"observations": {Type: "array", Description: "Array of observation objects: [{content: string, entity_names: string[], tier?: 'detail'|'summary'|'overview', confidence?: number, source?: string, metadata?: object}]"},
 			"domain":       domainProp,
 		},
-		Required: gkRequired("observations"),
+		Required: []string{"observations"},
 	}, func(ctx any, args map[string]any) (string, error) {
 		return gkForward(deps, "add_observations", args)
 	})
@@ -70,7 +68,7 @@ func RegisterGKTools(server *mcp.Server, deps *Dependencies) {
 			"max_chunk_size": {Type: "number", Description: "Max chars per chunk (default 2000)"},
 			"domain":         domainProp,
 		},
-		Required: gkRequired("content", "entity_names"),
+		Required: []string{"content", "entity_names"},
 	}, func(ctx any, args map[string]any) (string, error) {
 		return gkForward(deps, "add_chunked_observation", args)
 	})
@@ -82,7 +80,7 @@ func RegisterGKTools(server *mcp.Server, deps *Dependencies) {
 			"updates": {Type: "array", Description: "Array of update objects: [{name: string, type?: string, properties?: object, confidence?: number, staleness_tier?: 'detail'|'summary'|'overview'}]"},
 			"domain":  domainProp,
 		},
-		Required: gkRequired("updates"),
+		Required: []string{"updates"},
 	}, func(ctx any, args map[string]any) (string, error) {
 		return gkForward(deps, "update_entities", args)
 	})
@@ -94,7 +92,7 @@ func RegisterGKTools(server *mcp.Server, deps *Dependencies) {
 			"updates": {Type: "array", Description: "Array of update objects: [{from_name: string, to_name: string, type: string, properties?: object, confidence?: number}]"},
 			"domain":  domainProp,
 		},
-		Required: gkRequired("updates"),
+		Required: []string{"updates"},
 	}, func(ctx any, args map[string]any) (string, error) {
 		return gkForward(deps, "update_relationships", args)
 	})
@@ -106,7 +104,7 @@ func RegisterGKTools(server *mcp.Server, deps *Dependencies) {
 			"names":  {Type: "array", Description: "Array of entity name strings to delete"},
 			"domain": domainProp,
 		},
-		Required: gkRequired("names"),
+		Required: []string{"names"},
 	}, func(ctx any, args map[string]any) (string, error) {
 		return gkForward(deps, "delete_entities", args)
 	})
@@ -119,7 +117,7 @@ func RegisterGKTools(server *mcp.Server, deps *Dependencies) {
 			"target_name":  {Type: "string", Description: "Name of the entity to merge into (must exist)"},
 			"domain":       domainProp,
 		},
-		Required: gkRequired("source_names", "target_name"),
+		Required: []string{"source_names", "target_name"},
 	}, func(ctx any, args map[string]any) (string, error) {
 		return gkForward(deps, "merge_entities", args)
 	})
@@ -135,7 +133,7 @@ func RegisterGKTools(server *mcp.Server, deps *Dependencies) {
 			"entity_type": {Type: "string", Description: "Filter by entity type"},
 			"domain":      domainProp,
 		},
-		Required: gkRequired("query"),
+		Required: []string{"query"},
 	}, func(ctx any, args map[string]any) (string, error) {
 		return gkForward(deps, "search_keyword", args)
 	})
@@ -149,7 +147,7 @@ func RegisterGKTools(server *mcp.Server, deps *Dependencies) {
 			"entity_type": {Type: "string", Description: "Optional entity type filter"},
 			"domain":      domainProp,
 		},
-		Required: gkRequired("query"),
+		Required: []string{"query"},
 	}, func(ctx any, args map[string]any) (string, error) {
 		return gkForward(deps, "search", args)
 	})
@@ -162,7 +160,7 @@ func RegisterGKTools(server *mcp.Server, deps *Dependencies) {
 			"limit":  {Type: "number", Description: "Max results (default 10)"},
 			"domain": domainProp,
 		},
-		Required: gkRequired("query"),
+		Required: []string{"query"},
 	}, func(ctx any, args map[string]any) (string, error) {
 		return gkForward(deps, "search_entities", args)
 	})
@@ -187,7 +185,7 @@ func RegisterGKTools(server *mcp.Server, deps *Dependencies) {
 			"id":     {Type: "string", Description: "Observation ID from search results"},
 			"domain": domainProp,
 		},
-		Required: gkRequired("id"),
+		Required: []string{"id"},
 	}, func(ctx any, args map[string]any) (string, error) {
 		return gkForward(deps, "read_observation", args)
 	})
@@ -201,7 +199,7 @@ func RegisterGKTools(server *mcp.Server, deps *Dependencies) {
 			"name":   {Type: "string", Description: "Entity name"},
 			"domain": domainProp,
 		},
-		Required: gkRequired("name"),
+		Required: []string{"name"},
 	}, func(ctx any, args map[string]any) (string, error) {
 		return gkForward(deps, "get_entity", args)
 	})
@@ -213,7 +211,7 @@ func RegisterGKTools(server *mcp.Server, deps *Dependencies) {
 			"name":   {Type: "string", Description: "Entity name"},
 			"domain": domainProp,
 		},
-		Required: gkRequired("name"),
+		Required: []string{"name"},
 	}, func(ctx any, args map[string]any) (string, error) {
 		return gkForward(deps, "get_entity_profile", args)
 	})
@@ -251,7 +249,7 @@ func RegisterGKTools(server *mcp.Server, deps *Dependencies) {
 			"max_depth": {Type: "number", Description: "Max path length (default 5)"},
 			"domain":    domainProp,
 		},
-		Required: gkRequired("from_name", "to_name"),
+		Required: []string{"from_name", "to_name"},
 	}, func(ctx any, args map[string]any) (string, error) {
 		return gkForward(deps, "find_paths", args)
 	})
@@ -264,7 +262,7 @@ func RegisterGKTools(server *mcp.Server, deps *Dependencies) {
 			"max_depth": {Type: "number", Description: "Hops to traverse (default 2)"},
 			"domain":    domainProp,
 		},
-		Required: gkRequired("name"),
+		Required: []string{"name"},
 	}, func(ctx any, args map[string]any) (string, error) {
 		return gkForward(deps, "get_neighbors", args)
 	})
@@ -277,7 +275,7 @@ func RegisterGKTools(server *mcp.Server, deps *Dependencies) {
 			"max_depth":    {Type: "number", Description: "Hops from seeds (default 2)"},
 			"domain":       domainProp,
 		},
-		Required: gkRequired("entity_names"),
+		Required: []string{"entity_names"},
 	}, func(ctx any, args map[string]any) (string, error) {
 		return gkForward(deps, "extract_subgraph", args)
 	})
@@ -303,7 +301,7 @@ func RegisterGKTools(server *mcp.Server, deps *Dependencies) {
 			"limit":       {Type: "number", Description: "Max entries (default 20)"},
 			"domain":      domainProp,
 		},
-		Required: gkRequired("entity_name"),
+		Required: []string{"entity_name"},
 	}, func(ctx any, args map[string]any) (string, error) {
 		return gkForward(deps, "get_timeline", args)
 	})
@@ -359,7 +357,7 @@ func RegisterGKTools(server *mcp.Server, deps *Dependencies) {
 			"updates": {Type: "array", Description: "Array of {name: string, confidence: number} objects"},
 			"domain":  domainProp,
 		},
-		Required: gkRequired("updates"),
+		Required: []string{"updates"},
 	}, func(ctx any, args map[string]any) (string, error) {
 		return gkForward(deps, "bulk_update_confidence", args)
 	})
@@ -389,20 +387,3 @@ func gkForward(deps *Dependencies, toolName string, args map[string]any) (string
 	}
 	return result, nil
 }
-
-// GKToolNames returns the list of all registered GK tool names (gk_* prefix).
-// Useful for building agent tool lists.
-func GKToolNames() []string {
-	return []string{
-		"gk_add_entities", "gk_add_relationships", "gk_add_observations",
-		"gk_add_chunked_observation", "gk_update_entities", "gk_update_relationships",
-		"gk_delete_entities", "gk_merge_entities",
-		"gk_search_keyword", "gk_search", "gk_search_entities",
-		"gk_list_entities", "gk_read_observation",
-		"gk_get_entity", "gk_get_entity_profile", "gk_get_relationships",
-		"gk_list_entity_types", "gk_find_paths", "gk_get_neighbors",
-		"gk_extract_subgraph", "gk_get_centrality", "gk_get_timeline", "gk_validate_graph",
-		"gk_get_stats", "gk_prune_stale", "gk_get_health_report", "gk_bulk_update_confidence",
-	}
-}
-

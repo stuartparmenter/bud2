@@ -1,5 +1,6 @@
 # Go build artifacts
 /bud2
+/bud
 /bud-mcp
 /bud-state
 /bin/
@@ -18,7 +19,6 @@ bud.yaml
 .vscode/
 *.swp
 .claude/
-/bud
 
 .DS_Store
 *~

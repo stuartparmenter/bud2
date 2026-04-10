@@ -1,7 +1,6 @@
 package executive
 
 import (
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -72,26 +71,6 @@ type DebugEvent struct {
 	Duration float64
 	Usage    *SessionUsage
 	Err      error
-}
-
-// StreamEvent represents a Claude stream-json event
-type StreamEvent struct {
-	Type    string          `json:"type"`
-	Content json.RawMessage `json:"content,omitempty"`
-	Tool    *ToolUse        `json:"tool,omitempty"`
-	Text    string          `json:"text,omitempty"`
-	Message json.RawMessage `json:"message,omitempty"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	SubType string          `json:"subtype,omitempty"`
-	IsError bool            `json:"is_error,omitempty"`
-	Error   string          `json:"error,omitempty"`
-}
-
-// ToolUse represents a tool call
-type ToolUse struct {
-	Name string         `json:"name"`
-	Args map[string]any `json:"args"`
-	ID   string         `json:"id"`
 }
 
 func truncate(s string, maxLen int) string {

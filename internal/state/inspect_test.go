@@ -16,8 +16,8 @@ func TestInspector_Summary(t *testing.T) {
 		t.Fatalf("Summary failed: %v", err)
 	}
 
-	if summary.Traces.Total < 0 {
-		t.Error("traces total should be >= 0")
+	if summary.Percepts.Total < 0 {
+		t.Error("percepts total should be >= 0")
 	}
 }
 

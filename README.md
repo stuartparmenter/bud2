@@ -45,17 +45,55 @@ tail -f ~/Library/Logs/bud.log
 
 ```
 bud2/
-├── bin/                    # Compiled binaries (gitignored)
-├── daemon.ts              # Main daemon entrypoint
-├── scripts/               # Build and utility scripts
-├── state/                 # Working directory for Bud
-│   ├── system/           # System configuration and guides
-│   │   ├── guides/       # Detailed reference docs
-│   │   ├── memory.db     # Long-term memory
-│   │   └── activity.jsonl # Activity log
-│   ├── notes/            # Research and documentation
-│   └── projects/         # Active projects
-└── deploy/               # Deployment configuration
+├── cmd/                       # Go entrypoints
+│   ├── bud/                  # Main daemon (main.go, debug_executive.go)
+│   ├── efficient-notion-mcp/ # Notion MCP server
+│   ├── sdk-harness/          # SDK test harness
+│   ├── sdk-verify/           # SDK verification tool
+│   └── test-synthetic/       # Synthetic test runner
+├── internal/                  # Go packages (core logic)
+│   ├── executive/            # Executive decision engine & session management
+│   ├── engram/               # Memory service client (long-term graph memory)
+│   ├── reflex/               # Automated reflex engine
+│   ├── focus/                # Attention & salience system
+│   ├── gtd/                  # Task management
+│   ├── mcp/                  # MCP server & tool registrations
+│   ├── config/               # Multi-provider LLM configuration
+│   ├── senses/               # Input adapters (Discord, calendar)
+│   ├── effectors/            # Output adapters (Discord sending)
+│   ├── memory/               # Short-term working memory (percepts, threads, traces)
+│   ├── integrations/         # External service helpers (calendar, GitHub)
+│   ├── budget/               # Token/thinking-time budget tracking
+│   ├── embedding/            # Embedding generation
+│   ├── eval/                 # Evaluation utilities
+│   ├── logging/              # Structured logging
+│   ├── paths/                # Path resolution
+│   ├── profiling/            # Profiling support
+│   ├── state/                # State management helpers
+│   ├── tmux/                 # Tmux integration
+│   ├── zellij/               # Zellij integration
+│   ├── activity/             # Activity logging
+│   └── types/                # Shared type definitions
+├── seed/                      # Template files (seeded to state/ on startup)
+│   └── system/               # System templates & configuration
+│       ├── core.md           # Core system prompt
+│       ├── startup-instructions.md  # Startup impulse instructions
+│       ├── wakeup.md         # Autonomous wake instructions
+│       ├── guides/           # Reference docs (GTD, reflexes, projects, etc.)
+│       ├── reflexes/         # Reflex YAML definitions
+│       ├── plugins/          # Core plugin bundles (bud, bud-ops)
+│       ├── profiles/         # Agent profile definitions
+│       ├── jobs/             # Background job definitions
+│       ├── workflows/        # Workflow definitions
+│       └── agent-aliases.yaml # Agent alias configuration
+├── deploy/                    # Deployment config (launchd, systemd, scripts)
+├── scripts/                   # Build, test, and utility scripts
+├── tests/                     # Integration test scenarios
+├── bin/                       # Compiled binaries (gitignored)
+├── things-mcp/                # Things 3 MCP integration (TypeScript)
+├── sidecar/                   # Sidecar services (NER extraction)
+├── docs/                      # Architecture and design docs
+└── state/                     # Runtime state directory (gitignored, separate repo)
 ```
 
 ### Configuration
@@ -69,22 +107,22 @@ bud2/
 
 ## Development Workflow
 
-1. **Make changes** to daemon code
+1. **Make changes** to Go source in `cmd/` or `internal/`
 2. **Build:** `./scripts/build.sh`
 3. **Restart:** `launchctl kickstart -k gui/$(id -u)/com.bud.daemon` (macOS) or `systemctl --user restart bud.service` (Linux)
 4. **Verify:** Check logs (see Common Tasks above)
 
 ## Documentation
 
-Detailed guides are in `state/system/guides/`:
+Detailed guides are in `seed/system/guides/`:
 
-- [**repositories.md**](state/system/guides/repositories.md) - Git workflow, branching, PRs
-- [**state-management.md**](state/system/guides/state-management.md) - Memory, sessions, introspection
-- [**projects.md**](state/system/guides/projects.md) - Project folders and notes
-- [**gtd.md**](state/system/guides/gtd.md) - Task management
-- [**integrations.md**](state/system/guides/integrations.md) - Notion, Calendar, GitHub
-- [**observability.md**](state/system/guides/observability.md) - Activity logs and journals
-- [**wellness.md**](state/system/guides/wellness.md) - Daily housekeeping
+- [**repositories.md**](seed/system/guides/repositories.md) - Git workflow, branching, PRs
+- [**state-management.md**](seed/system/guides/state-management.md) - Memory, sessions, introspection
+- [**projects.md**](seed/system/guides/projects.md) - Project folders and notes
+- [**gtd.md**](seed/system/guides/gtd.md) - Task management
+- [**integrations.md**](seed/system/guides/integrations.md) - Notion, Calendar, GitHub
+- [**observability.md**](seed/system/guides/observability.md) - Activity logs and journals
+- [**wellness.md**](seed/system/guides/wellness.md) - Daily housekeeping
 
 **Integrations:**
 - [**Things Integration**](docs/things-integration.md) - Use Things 3 as your GTD backend (set `USE_THINGS=true`)

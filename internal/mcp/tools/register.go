@@ -39,7 +39,6 @@ func RegisterAll(server *mcp.Server, deps *Dependencies) {
 	registerCommunicationTools(server, deps)
 	registerMemoryTools(server, deps)
 	registerActivityTools(server, deps)
-	registerMotivationTools(server, deps)
 	registerStateTools(server, deps)
 
 	if deps.GTDStore != nil {
@@ -206,10 +205,10 @@ func registerCommunicationTools(server *mcp.Server, deps *Dependencies) {
 	server.RegisterTool("signal_done", mcp.ToolDef{
 		Description: "Signal that you have finished processing and are ready for new prompts. IMPORTANT: Always call this when you have completed responding to a message or finishing a task. This helps track thinking time and enables autonomous work scheduling.",
 		Properties: map[string]mcp.PropDef{
-			"session_id":    {Type: "string", Description: "The current session ID (if known)"},
-			"summary":       {Type: "string", Description: "Brief summary of what was accomplished (optional)"},
-			"memory_eval":   {Type: "object", Description: "Memory usefulness ratings as {\"M1\": 5, \"M2\": 1} where 1=not useful, 5=very useful"},
-			"handoff_note":  {Type: "string", Description: "Brief note for the next autonomous session: what was done, what's pending, anything to be aware of."},
+			"session_id":   {Type: "string", Description: "The current session ID (if known)"},
+			"summary":      {Type: "string", Description: "Brief summary of what was accomplished (optional)"},
+			"memory_eval":  {Type: "object", Description: "Memory usefulness ratings as {\"M1\": 5, \"M2\": 1} where 1=not useful, 5=very useful"},
+			"handoff_note": {Type: "string", Description: "Brief note for the next autonomous session: what was done, what's pending, anything to be aware of."},
 		},
 	}, func(ctx any, args map[string]any) (string, error) {
 		sessionID, _ := args["session_id"].(string)
@@ -299,7 +298,6 @@ func registerMemoryTools(server *mcp.Server, deps *Dependencies) {
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return string(data), nil
 	})
-
 
 	// search_memory (if engram client is available)
 	if deps.EngramClient != nil {
@@ -637,12 +635,6 @@ func registerActivityTools(server *mcp.Server, deps *Dependencies) {
 	})
 }
 
-func registerMotivationTools(server *mcp.Server, deps *Dependencies) {
-	// Motivation tools have been migrated to Things MCP integration
-	// Tasks and ideas are now managed via Things 3
-	// See things-mcp tools: things_add_todo, things_add_project, etc.
-}
-
 func registerStateTools(server *mcp.Server, deps *Dependencies) {
 	if deps.StateInspector == nil {
 		return
@@ -756,17 +748,6 @@ func registerStateTools(server *mcp.Server, deps *Dependencies) {
 		default:
 			return "", fmt.Errorf("unknown action: %s", action)
 		}
-	})
-
-
-	// memory_flush
-	server.RegisterTool("memory_flush", mcp.ToolDef{
-		Description: "Flush the conversation buffer to memory. Clears conversation context but keeps session running. Pending thoughts will be extracted by main process.",
-		Properties:  map[string]mcp.PropDef{},
-	}, func(ctx any, args map[string]any) (string, error) {
-		// Engram handles consolidation automatically — no explicit trigger needed.
-		log.Printf("Memory flush: Engram will consolidate automatically")
-		return "Memory flushed. Engram handles consolidation automatically.", nil
 	})
 
 	// memory_reset - full session reset with coordination
@@ -1064,6 +1045,10 @@ func registerGTDTools(server *mcp.Server, deps *Dependencies) {
 			task.Heading = heading
 		}
 
+		if err := deps.GTDStore.ValidateTask(task); err != nil {
+			return "", fmt.Errorf("validation failed: %w", err)
+		}
+
 		deps.GTDStore.AddTask(task)
 		if err := deps.GTDStore.Save(); err != nil {
 			return "", fmt.Errorf("failed to save task: %w", err)
@@ -1192,6 +1177,10 @@ func registerGTDTools(server *mcp.Server, deps *Dependencies) {
 			}
 			task.Checklist = items
 			updates = append(updates, "checklist")
+		}
+
+		if err := deps.GTDStore.ValidateTask(task); err != nil {
+			return "", fmt.Errorf("validation failed: %w", err)
 		}
 
 		if err := deps.GTDStore.UpdateTask(task); err != nil {
@@ -1352,6 +1341,10 @@ func registerGTDTools(server *mcp.Server, deps *Dependencies) {
 				}
 			}
 
+			if err := deps.GTDStore.ValidateProject(project); err != nil {
+				return "", fmt.Errorf("validation failed: %w", err)
+			}
+
 			deps.GTDStore.AddProject(project)
 			if err := deps.GTDStore.Save(); err != nil {
 				return "", fmt.Errorf("failed to save: %w", err)
@@ -1396,6 +1389,10 @@ func registerGTDTools(server *mcp.Server, deps *Dependencies) {
 					}
 				}
 				updates = append(updates, "headings")
+			}
+
+			if err := deps.GTDStore.ValidateProject(project); err != nil {
+				return "", fmt.Errorf("validation failed: %w", err)
 			}
 
 			if err := deps.GTDStore.UpdateProject(project); err != nil {
@@ -2447,10 +2444,10 @@ func registerProjectTools(server *mcp.Server, deps *Dependencies) {
 		}
 
 		result := map[string]any{
-			"created":  true,
-			"path":     dir,
-			"yaml":     yamlPath,
-			"notes":    notesPath,
+			"created": true,
+			"path":    dir,
+			"yaml":    yamlPath,
+			"notes":   notesPath,
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return string(data), nil

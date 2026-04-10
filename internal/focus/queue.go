@@ -75,28 +75,6 @@ func (q *Queue) Get(id string) *PendingItem {
 	return nil
 }
 
-// Peek returns the highest priority item without removing it
-func (q *Queue) Peek() *PendingItem {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-
-	if len(q.items) == 0 {
-		return nil
-	}
-
-	// Find highest priority (lowest number)
-	best := q.items[0]
-	for _, item := range q.items[1:] {
-		if item.Priority < best.Priority {
-			best = item
-		} else if item.Priority == best.Priority && item.Salience > best.Salience {
-			best = item
-		}
-	}
-
-	return best
-}
-
 // PopHighest removes and returns the highest priority item
 func (q *Queue) PopHighest() *PendingItem {
 	q.mu.Lock()
@@ -216,48 +194,6 @@ func (q *Queue) All() []*PendingItem {
 	return result
 }
 
-// FilterByPriority returns items at or above the given priority
-func (q *Queue) FilterByPriority(maxPriority Priority) []*PendingItem {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-
-	var result []*PendingItem
-	for _, item := range q.items {
-		if item.Priority <= maxPriority {
-			result = append(result, item)
-		}
-	}
-	return result
-}
-
-// FilterByType returns items of the given type
-func (q *Queue) FilterByType(itemType string) []*PendingItem {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-
-	var result []*PendingItem
-	for _, item := range q.items {
-		if item.Type == itemType {
-			result = append(result, item)
-		}
-	}
-	return result
-}
-
-// Count returns the number of items in the queue
-func (q *Queue) Count() int {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-	return len(q.items)
-}
-
-// Clear removes all items from the queue
-func (q *Queue) Clear() {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.items = make([]*PendingItem, 0)
-}
-
 // trim removes excess items (oldest, lowest priority first)
 func (q *Queue) trim() {
 	// Sort by priority (desc) then age (desc)
@@ -323,23 +259,5 @@ func (q *Queue) Load() error {
 	}
 
 	q.items = items
-	return nil
-}
-
-// Save persists queue state to disk
-func (q *Queue) Save() error {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-
-	data, err := json.MarshalIndent(q.items, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal queue: %w", err)
-	}
-
-	filePath := filepath.Join(q.path, "pending_queue.json")
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write queue: %w", err)
-	}
-
 	return nil
 }

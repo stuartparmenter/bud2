@@ -30,7 +30,6 @@ type ComponentSummary struct {
 
 // StateSummary holds summary of all state
 type StateSummary struct {
-	Traces   ComponentSummary `json:"traces"`
 	Percepts ComponentSummary `json:"percepts"`
 	Threads  ComponentSummary `json:"threads"`
 	Activity int              `json:"activity_entries"`
@@ -78,11 +77,6 @@ func (i *Inspector) Health() (*HealthReport, error) {
 	summary, _ := i.Summary()
 
 	// Check for potential issues
-	if summary.Traces.Total > 1000 {
-		report.Warnings = append(report.Warnings, fmt.Sprintf("High trace count: %d", summary.Traces.Total))
-		report.Recommendations = append(report.Recommendations, "Consider pruning old traces")
-	}
-
 	if summary.Percepts.Total > 100 {
 		report.Warnings = append(report.Warnings, fmt.Sprintf("High percept count: %d", summary.Percepts.Total))
 		report.Recommendations = append(report.Recommendations, "Percepts should decay; check consolidation")

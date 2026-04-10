@@ -14,12 +14,12 @@ type Task struct {
 	Title       string          `json:"title"`
 	Notes       string          `json:"notes,omitempty"`
 	Checklist   []ChecklistItem `json:"checklist,omitempty"`
-	When        string          `json:"when"`                   // inbox, today, anytime, someday, or YYYY-MM-DD
-	Project     string          `json:"project,omitempty"`      // project ID
-	Heading     string          `json:"heading,omitempty"`      // heading name within project
-	Area        string          `json:"area,omitempty"`         // area ID (only if not in project)
-	Repeat      string          `json:"repeat,omitempty"`       // daily, weekly, monthly, etc.
-	Status      string          `json:"status"`                 // open, completed, canceled
+	When        string          `json:"when"`              // inbox, today, anytime, someday, or YYYY-MM-DD
+	Project     string          `json:"project,omitempty"` // project ID
+	Heading     string          `json:"heading,omitempty"` // heading name within project
+	Area        string          `json:"area,omitempty"`    // area ID (only if not in project)
+	Repeat      string          `json:"repeat,omitempty"`  // daily, weekly, monthly, etc.
+	Status      string          `json:"status"`            // open, completed, canceled
 	CompletedAt *time.Time      `json:"completed_at,omitempty"`
 	Order       float64         `json:"order"`
 }
@@ -67,4 +67,6 @@ type Store interface {
 	UpdateTask(task *Task) error
 	CompleteTask(id string) error
 	FindTaskByTitle(title string) *Task
+	ValidateTask(task *Task) error
+	ValidateProject(project *Project) error
 }
