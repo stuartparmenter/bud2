@@ -21,8 +21,9 @@ If there are no actionable Things tasks in the Bud area (and no blocked subagent
 
 ```
 Agent_spawn_async(
-  profile: "bud:doc-maintain",
-  constraints: "Idle fallback — no other tasks pending. Use --autonomous flag throughout. Stop after one improvement."
+  profile: "bud:coder",
+  task: "Follow the doc-maintain skill. Find and read the SKILL.md for 'doc-maintain' in the loaded plugins, then execute its instructions exactly. If the skill isn't available, scan codebase docs for staleness and make one improvement. Stop after one improvement.",
+  constraints: "Idle fallback — no other tasks pending."
 )
 ```
 

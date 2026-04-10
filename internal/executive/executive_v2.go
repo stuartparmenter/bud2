@@ -1887,7 +1887,7 @@ func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 				for _, f := range driftFiles {
 					prompt.WriteString(fmt.Sprintf("- `%s`\n", f))
 				}
-				prompt.WriteString("\nTo update, run: `seed-sync update`\nOr to see diffs: `seed-sync diff`\n\n")
+				prompt.WriteString("\nUse `talk_to_user` to ask the user whether they want to update these files in their state directory.\n\n")
 			}
 		}
 	}
