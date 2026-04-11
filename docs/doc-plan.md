@@ -21,7 +21,7 @@ Topics span modules — signals are the max across constituent modules.
 
 ## Recommended next
 
-Run `dev:arch-doc "State-Defaults Overlay & Configuration Loading"` on `bud2` — this is the highest-priority undocumented topic introduced in the seed→state-defaults migration (commits 49aa775, 6efc99f) and the new `bud.yaml` configuration system.
+All topics generated. Run `dev:repo-doc bud2` to refresh the overview and doc-plan when significant new features land.
 
 ---
 _Generated: 2026-04-11T02:40:00Z | Commit: 524e027b_
