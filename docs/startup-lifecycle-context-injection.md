@@ -1,15 +1,15 @@
 ---
 topic: Startup Lifecycle & Context Injection
 repo: bud2
-generated_at: 2026-04-09T03:17:24Z
-commit: ff44de6
+generated_at: 2026-04-12T00:00:00Z
+commit: 82261e9
 key_modules: [cmd/bud, internal/executive, seed/startup-instructions.md]
 score: 0.85
 ---
 
 # Startup Lifecycle & Context Injection
 
-> Repo: `bud2` | Generated: 2026-04-09 | Commit: ff44de6
+> Repo: `bud2` | Generated: 2026-04-12 | Commit: 82261e9
 
 ## Summary
 
@@ -68,7 +68,7 @@ The startup impulse is a focus item with `Type = "impulse:startup"` injected by 
 
 5. **Session ID recovery** (`LoadSessionFromDisk`): `SimpleSession.LoadSessionFromDisk()` reads `state/system/exec_session.json`. If the file exists and the stored `ClaudeSessionID` is non-empty, it sets `claudeSessionID` so the next user-initiated session can resume the previous conversation thread. The startup impulse itself does NOT resume — it always starts a new session.
 
-6. **Plugin manifest loading** (`loadManifestPlugins`): `state/system/plugins.yaml` is parsed; each entry is either a local `path:` or a GitHub `owner/repo[:dir][@ref]`. Remote repos are cloned into `~/.cache/bud/plugins/` (or fast-forward pulled if already present). Plugin directories discovered this way are passed to Claude sessions as `--plugin-dir` so agents and skills defined in external repos are available without symlinks. The `exclude:` list on each manifest entry skips named sub-plugin subdirectories during both agent-def loading and MCP tool registration.
+6. **Plugin manifest loading** (`loadManifestPlugins` + `loadManifestSkills`): `state/system/extensions.yaml` is parsed (falls back to `plugins.yaml` with a deprecation warning if the new file is absent). The manifest has two top-level sections: `plugins:` for full plugin repos (agents + skills + tool grants) and `skills:` for standalone skill-only packages from ClaWHub (`clawhub:slug[@version]`), GitHub (`git:owner/repo[:dir][@ref]`), or local paths (`path:/local/path`). Remote plugin repos are cloned into `~/Library/Caches/bud/plugins/` (`os.UserCacheDir()/bud/plugins/`) on first run and fast-forward-pulled on subsequent starts; ClaWHub skills land under `~/Library/Caches/bud/skills-clawhub/`. Plugin entries support explicit `git:` / `path:` prefixes; bare `owner/repo` still works with a deprecation warning. Plugin directories discovered this way are passed to Claude sessions as `--plugin-dir` so agents and skills defined in external repos are available without symlinks. The `exclude:` list on each manifest entry skips named sub-plugin subdirectories during both agent-def loading and MCP tool registration.
 
 7. **MCP tool registration** (`tools.RegisterAll`): All MCP tools are registered with the HTTP server. After registration, `exec.SetKnownMCPTools(knownTools)` is called — this lets wildcard patterns in `tool_grants` (e.g. `mcp__bud2__gk_*`) expand correctly against the live tool list.
 
@@ -126,7 +126,8 @@ The startup impulse is a focus item with `Type = "impulse:startup"` injected by 
 
 ## Start Here
 
-- `cmd/bud/main.go` — entry point; read the `main()` function top-to-bottom to see the exact initialization order, especially the `seedSystemDir` calls, `writeMCPConfig`, `loadManifestPlugins`, and the startup impulse injection at the bottom.
+- `cmd/bud/main.go` — entry point; read the `main()` function top-to-bottom to see the exact initialization order, especially the `seedSystemDir` calls, `writeMCPConfig`, `loadManifestPlugins`, `loadManifestSkills`, and the startup impulse injection at the bottom.
+- `internal/executive/extensions.go` — standalone skill loading: `loadManifestSkills`, `downloadClawhubSkill`, `cloneOrUpdateGitSkillEntry`, `resolvedManifestSkillDirs`; read alongside `simple_session.go` for full plugin loading picture.
 - `seed/startup-instructions.md` — the instruction file injected into startup prompts; defines what Claude does on cold start (subagent re-spawn + signal_done).
 - `internal/executive/executive_v2.go:buildPrompt` — where startup vs. wake branching happens; look for the `impulse:startup` type check and how `StartupInstructions` is injected.
 - `internal/executive/simple_session.go:LoadSessionFromDisk` / `SaveSessionToDisk` — the session persistence mechanism; shows what survives a Bud restart and what doesn't.
