@@ -1359,13 +1359,8 @@ func main() {
 	}
 
 	// Inject startup impulse so the executive runs startup housekeeping.
-	// Attach any handoff notes left by the pre-restart session.
 	go func() {
 		time.Sleep(3 * time.Second) // Let executive initialize
-		extra := map[string]any{}
-		if note := readAutonomousHandoff(statePath); note != "" {
-			extra["autonomous_handoff"] = note
-		}
 		processInboxMessage(&memory.InboxMessage{
 			ID:        "startup-" + time.Now().Format("20060102T150405"),
 			Type:      "impulse",
@@ -1374,7 +1369,6 @@ func main() {
 			Priority:  3, // P3ActiveWork
 			Timestamp: time.Now(),
 			Status:    "pending",
-			Extra:     extra,
 		})
 	}()
 
@@ -1535,7 +1529,6 @@ func main() {
 						Data: map[string]any{
 							"trigger":              "periodic",
 							"last_user_session_ts": lastInput.Format(time.RFC3339),
-							"autonomous_handoff":   readAutonomousHandoff(statePath),
 						},
 					}
 
@@ -1639,22 +1632,4 @@ func writeMCPConfig(statePath, httpPort string) error {
 
 	log.Printf("[main] Wrote %s with HTTP MCP server at port %s", mcpConfigPath, httpPort)
 	return nil
-}
-
-// readAutonomousHandoff reads all handoff notes left by previous autonomous
-// sessions (written by signal_done) and truncates the file so the next wake
-// starts clean. Returns empty string if none exist.
-func readAutonomousHandoff(statePath string) string {
-	path := filepath.Join(statePath, "system", "autonomous-handoff.md")
-	f, err := os.OpenFile(path, os.O_RDWR, 0644)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	data, err := io.ReadAll(f)
-	if err != nil || len(data) == 0 {
-		return ""
-	}
-	_ = f.Truncate(0) // consume notes; next wake starts fresh
-	return string(data)
 }

@@ -42,4 +42,4 @@ Short tasks you can do directly in <2 min:
 
 Always call `signal_done` with:
 - `summary`: what subagents are running / what was completed
-- `handoff_note`: 2-3 sentences — what's in flight, any blockers, what next wake should check
+- `handoff_note`: 2-3 sentences — what's in flight, any blockers, what next session should check (injected into all wakes, not just autonomous ones)

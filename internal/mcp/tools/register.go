@@ -208,14 +208,14 @@ func registerCommunicationTools(server *mcp.Server, deps *Dependencies) {
 			"session_id":   {Type: "string", Description: "The current session ID (if known)"},
 			"summary":      {Type: "string", Description: "Brief summary of what was accomplished (optional)"},
 			"memory_eval":  {Type: "object", Description: "Memory usefulness ratings as {\"M1\": 5, \"M2\": 1} where 1=not useful, 5=very useful"},
-			"handoff_note": {Type: "string", Description: "Brief note for the next autonomous session: what was done, what's pending, anything to be aware of."},
+			"handoff_note": {Type: "string", Description: "Brief note for the next executive session: what was done, what's pending, anything to be aware of. Injected at the start of the next session regardless of wake type."},
 		},
 	}, func(ctx any, args map[string]any) (string, error) {
 		sessionID, _ := args["session_id"].(string)
 		summary, _ := args["summary"].(string)
 		memoryEval, _ := args["memory_eval"].(map[string]any)
 
-		// Write handoff note for the next autonomous session.
+		// Write handoff note for the next executive session (any wake type).
 		// O_APPEND so concurrent signal_done calls don't overwrite each other.
 		if note, ok := args["handoff_note"].(string); ok && note != "" {
 			notePath := filepath.Join(deps.SystemPath, "autonomous-handoff.md")

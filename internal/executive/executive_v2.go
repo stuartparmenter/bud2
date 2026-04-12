@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -870,6 +872,7 @@ func (e *ExecutiveV2) processItem(ctx context.Context, items []*focus.PendingIte
 
 	// Set up callbacks
 	var output strings.Builder
+	var thinkingBlocks []string
 	e.session.OnOutput(func(text string) {
 		output.WriteString(text)
 		e.notifyDebug(DebugEvent{Type: DebugEventText, Text: text})
@@ -942,6 +945,10 @@ func (e *ExecutiveV2) processItem(ctx context.Context, items []*focus.PendingIte
 					output.WriteString(text)
 					e.notifyDebug(DebugEvent{Type: DebugEventText, Text: text})
 					e.session.WriteSessionLogEntry("TEXT: %s", text)
+				},
+				OnThinking: func(text string) {
+					thinkingBlocks = append(thinkingBlocks, text)
+					e.session.WriteSessionLogEntry("THINKING: %s", truncate(text, 200))
 				},
 				OnTool: func(name string, input map[string]any) {
 					e.notifyDebug(DebugEvent{Type: DebugEventToolCall, Tool: name, Args: input})
@@ -1073,8 +1080,19 @@ func (e *ExecutiveV2) processItem(ctx context.Context, items []*focus.PendingIte
 		logging.Debug("executive", "Output length: %d, MCP tools: %v", output.Len(), e.mcpToolCalled)
 
 		// Build fallback message - use Claude's output or generic error
-		fallbackMsg := strings.TrimSpace(output.String())
-		if fallbackMsg == "" {
+		var fallbackParts []string
+		for _, block := range thinkingBlocks {
+			if t := strings.TrimSpace(block); t != "" {
+				fallbackParts = append(fallbackParts, "<thinking>\n"+t+"\n</thinking>")
+			}
+		}
+		if text := strings.TrimSpace(output.String()); text != "" {
+			fallbackParts = append(fallbackParts, text)
+		}
+		var fallbackMsg string
+		if len(fallbackParts) > 0 {
+			fallbackMsg = "[raw model output]\n\n" + strings.Join(fallbackParts, "\n\n")
+		} else {
 			fallbackMsg = "[Internal error: response was generated but not sent. This is a bug.]"
 		}
 
@@ -1818,24 +1836,22 @@ func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 			if ts, ok := bundle.CurrentFocus.Data["last_user_session_ts"].(string); ok && ts != "" {
 				prompt.WriteString(fmt.Sprintf("Last user session: %s\n\n", ts))
 			}
-			// Previous autonomous session handoff note
-			if note, ok := bundle.CurrentFocus.Data["autonomous_handoff"].(string); ok && note != "" {
-				prompt.WriteString("## Previous Autonomous Session Note\n")
-				prompt.WriteString(note)
-				prompt.WriteString("\n\n")
-			}
 		}
 
 		// For startup impulses, inject startup instructions
 		if bundle.CurrentFocus.Content == "impulse:startup" && e.config.StartupInstructions != "" {
 			prompt.WriteString(e.config.StartupInstructions)
 			prompt.WriteString("\n")
-			// Surface any handoff notes from sessions that ran before the restart
-			if note, ok := bundle.CurrentFocus.Data["autonomous_handoff"].(string); ok && note != "" {
-				prompt.WriteString("## Previous Session Note\n")
-				prompt.WriteString(note)
-				prompt.WriteString("\n\n")
-			}
+		}
+	}
+
+	// Previous executive session handoff note — injected for all session types.
+	// Written by signal_done; consumed (file truncated) on first read.
+	if !skipContext {
+		if note := readHandoff(e.session.statePath); note != "" {
+			prompt.WriteString("## Previous Executive Session Note\n")
+			prompt.WriteString(note)
+			prompt.WriteString("\n\n")
 		}
 	}
 
@@ -1845,6 +1861,24 @@ func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 	}
 
 	return prompt.String()
+}
+
+// readHandoff reads all handoff notes left by previous executive sessions
+// (written by signal_done) and truncates the file so the next session starts clean.
+// Returns empty string if none exist.
+func readHandoff(statePath string) string {
+	path := filepath.Join(statePath, "system", "autonomous-handoff.md")
+	f, err := os.OpenFile(path, os.O_RDWR, 0644)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	data, err := io.ReadAll(f)
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+	_ = f.Truncate(0) // consume notes; next session starts fresh
+	return string(data)
 }
 
 // handleToolCall observes tool calls from Claude's stream-json output.
