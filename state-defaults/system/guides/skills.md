@@ -1,6 +1,9 @@
 # Skills Guide
 
-Skills are prompt templates stored as plugin skills: `state/system/plugins/<plugin>/skills/<name>/SKILL.md`. Bud passes `--plugin-dir` for each plugin via SDK options at session start.
+Skills are prompt templates loaded from two sources:
+
+1. **Plugin skills** — `state/system/plugins/<plugin>/skills/<name>/SKILL.md`. Bud passes `--plugin-dir` for each plugin via SDK options at session start. Available to the Claude Code `Skill` tool.
+2. **Standalone skills** — declared in `state/system/extensions.yaml` under the `skills:` key. Sourced from ClaWHub, GitHub repos, or local paths. Available to SDK-path agents (injected into their system prompts); not yet available to the Claude Code `Skill` tool.
 
 Claude Code loads skills from all plugins and surfaces their names and descriptions in `<system-reminder>` each session. When invoked via the `Skill` tool, the full SKILL.md body loads into the current session.
 
@@ -73,16 +76,50 @@ The conversation buffer provides continuity. No architectural change needed.
 
 ## Adding New Skills
 
-All skills live in plugins. Skill loading is automatic — no symlinks needed.
+### Option 1 — Add to an existing local plugin
 
-**Add to an existing plugin:**
 1. Create `state/system/plugins/<plugin>/skills/<name>/SKILL.md`
-2. Add to the "Current skills" list in this guide
+2. Add the skill to the "Current skills" list in this guide
 
-**Create a new plugin:**
+### Option 2 — Create a new local plugin
+
 1. Create `state/system/plugins/<plugin>/.claude-plugin/plugin.json`
 2. Add skills in `state/system/plugins/<plugin>/skills/<name>/SKILL.md`
 3. Bud passes `--plugin-dir` for each plugin dir at session start via the SDK
+
+### Option 3 — Load a standalone skill via `extensions.yaml`
+
+For skills from ClaWHub, GitHub, or a local path that don't belong to a plugin. Edit `state/system/extensions.yaml` and add an entry to the `skills:` section.
+
+**ClaWHub** (recommended for community skills):
+```yaml
+skills:
+  - clawhub:trello              # latest version
+  - clawhub:trello@1.0.0        # pinned to a specific version
+  - clawhub:steipete/trello     # owner prefix is accepted but ignored (slugs are global)
+  - clawhub:https://clawhub.ai/steipete/self-improving-agent  # full browser URL
+```
+
+Browse skills at https://clawhub.ai. The slug is the last path component of the URL.
+
+ClaWHub skills are downloaded as a zip (preserving any subdirectory structure) and cached at `~/Library/Caches/bud/skills-clawhub/skills/<slug>/`. Floating (unpinned) skills are re-fetched at the interval set in `bud.yaml`:
+```yaml
+extensions:
+  update_interval: 1h   # default; set to 0 to disable auto-updates
+```
+
+**GitHub** (repo containing a `skills/` directory):
+```yaml
+skills:
+  - git:owner/repo                      # whole repo treated as a plugin dir
+  - git:owner/repo:path/to/skills@v1    # specific subdir, pinned ref, sparse checkout
+```
+
+**Local path**:
+```yaml
+skills:
+  - path:/local/path/to/skill-dir       # must contain a skills/ subdirectory
+```
 
 Then add the new skill to the "Current skills" list in this guide.
 

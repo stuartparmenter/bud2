@@ -151,6 +151,9 @@ func NewExecutiveV2(
 	cfg ExecutiveV2Config,
 ) *ExecutiveV2 {
 	sess := NewSimpleSession(statePath)
+	if cfg.ProviderConfig != nil {
+		sess.extensionsUpdateInterval = cfg.ProviderConfig.Extensions.ParsedUpdateInterval()
+	}
 	sess.LoadSessionFromDisk()
 	exec := &ExecutiveV2{
 		session:        sess,

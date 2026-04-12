@@ -55,7 +55,7 @@ type pluginDir struct {
 
 2. **Plugin directory enumeration** (`generateZettelLibraries` in `simple_session.go`): The function calls `allPluginDirs(statePath)` which combines two sources:
    - **Local plugins**: directories under `state/system/plugins/` whose subdirectories pass `looksLikePluginDir` (has `.claude-plugin/plugin.json`, an `agents/` subdir, or `.md` files).
-   - **Manifest plugins**: directories in `~/Library/Caches/bud/plugins/` cloned from `state/system/plugins.yaml` entries, resolved via `resolvePluginPathsFromLocalPath` (monorepo entries are expanded one level deep).
+   - **Manifest plugins**: directories in `~/Library/Caches/bud/plugins/` cloned from the `plugins:` section of `state/system/extensions.yaml`, resolved via `resolvePluginPathsFromLocalPath` (monorepo entries are expanded one level deep). Note: standalone skill entries from the `skills:` section are searched by `LoadSkillContent` but are not scanned for `plugin.json` zettel declarations.
 
 3. **Plugin manifest inspection**: For each discovered plugin directory, `generateZettelLibraries` attempts to read `<dir>/.claude-plugin/plugin.json`. If the file is absent or the JSON has no `"zettels"` field, the plugin is silently skipped.
 
@@ -69,7 +69,7 @@ type pluginDir struct {
 
 - **Generated at startup, not on demand**: `generateZettelLibraries` runs once in `main()`, not lazily on first use. This keeps the file always present when the executive starts and avoids concurrency issues with multiple sessions discovering the same plugins in parallel.
 
-- **Cache-cloned plugins are always readonly**: The OS cache directory rule enforces a hard invariant: Bud never commits user-created zettel content into GitHub-managed plugin checkouts. Local path entries (`path:` in `plugins.yaml`) are not in the cache directory and therefore can be writable. This is a security boundary — it prevents zettel writes from silently modifying a shared upstream repo.
+- **Cache-cloned plugins are always readonly**: The OS cache directory rule enforces a hard invariant: Bud never commits user-created zettel content into GitHub-managed plugin checkouts. Local path entries (`path:` in `extensions.yaml`) are not in the cache directory and therefore can be writable. This is a security boundary — it prevents zettel writes from silently modifying a shared upstream repo.
 
 - **Monorepo expansion is one level deep** (`resolvePluginPathsFromLocalPath`): A cloned repo root that doesn't look like a plugin dir is expanded into its immediate subdirectories. This supports monorepo-style plugins where multiple plugins live under one GitHub repo. Only one level is expanded — deeper nesting is not supported.
 
@@ -90,7 +90,7 @@ type pluginDir struct {
 
 ## Non-Obvious Behaviors
 
-- **The file is always overwritten**: Every startup regenerates `zettel-libraries.yaml` from scratch. Any manual edits to the file will be silently lost on the next restart. If you need a custom library, add it via a local plugin `path:` entry in `plugins.yaml`.
+- **The file is always overwritten**: Every startup regenerates `zettel-libraries.yaml` from scratch. Any manual edits to the file will be silently lost on the next restart. If you need a custom library, add it via a local plugin `path:` entry in the `plugins:` section of `extensions.yaml`.
 
 - **`Readonly` in `plugin.json` is ignored for cache plugins**: A plugin manifest can declare `"readonly": false`, but if the plugin lives in the OS cache directory, bud overrides it to `true`. The only way to get a writable cache-cloned plugin would be to move the checkout out of the cache — i.e., use a `path:` entry.
 
@@ -104,6 +104,6 @@ type pluginDir struct {
 
 - `internal/executive/simple_session.go` — contains `generateZettelLibraries`, `zettelLibrary`, `zettelLibrariesFile`, `allPluginDirs`, and `resolvePluginPathsFromLocalPath`; this is the entire implementation
 - `cmd/bud/main.go` — shows the call site (`generateZettelLibraries(statePath)`) and its position in the startup sequence relative to seed initialization and executive construction
-- `state/system/plugins.yaml` — the manifest that drives which external repos are cloned; `path:` entries here produce writable zettel library candidates
+- `state/system/extensions.yaml` — the manifest that drives which external repos are cloned (via `plugins:` section); `path:` entries here produce writable zettel library candidates. The `skills:` section is not scanned for zettel declarations.
 - `~/.cache/bud/plugins/` (or `~/Library/Caches/bud/plugins/` on macOS) — where GitHub-cloned plugins land; all zettel libs from this directory are readonly
 - Any `seed/plugins/*/` or `state/system/plugins/*/` directory with a `.claude-plugin/plugin.json` that includes a `"zettels"` key — that is the minimal hook to add a new zettel library

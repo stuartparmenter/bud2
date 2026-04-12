@@ -97,12 +97,14 @@ func scanLocalPlugins(statePath string) []string {
 	return paths
 }
 
-// pluginManifest is the structure of state/system/plugins.yaml.
+// pluginManifest is the structure of state/system/extensions.yaml
+// (formerly plugins.yaml — see extensionsManifestPath for the fallback logic).
 type pluginManifest struct {
 	Plugins []pluginManifestEntry `yaml:"plugins"`
+	Skills  []skillManifestEntry  `yaml:"skills"`
 }
 
-// pluginManifestEntry is a single entry in plugins.yaml.
+// pluginManifestEntry is a single entry in the plugins: section of extensions.yaml.
 // Supports both string form ("owner/repo[:dir][@ref]") and object form
 // (with repo/dir/ref/path/tool_grants fields).
 type pluginManifestEntry struct {
@@ -119,11 +121,19 @@ type pluginManifestEntry struct {
 	Exclude []string
 }
 
-// UnmarshalYAML handles both string ("owner/repo[:dir][@ref]") and
-// object form ({ repo: ..., dir: ..., ref: ..., path: ..., tool_grants: ... }).
+// UnmarshalYAML handles both string and object form for plugin entries.
+//
+// String form supports explicit prefixes:
+//
+//	git:owner/repo[:dir][@ref]   — GitHub repo (preferred)
+//	path:/local/path             — local filesystem path
+//	owner/repo[:dir][@ref]       — legacy bare form (logs deprecation warning)
+//
+// clawhub: entries in the plugins: section log a "not yet supported" warning and
+// are skipped (reserved for future use).
 func (e *pluginManifestEntry) UnmarshalYAML(value *yaml.Node) error {
 	if value.Kind == yaml.ScalarNode {
-		return e.parseRepoString(value.Value)
+		return e.parsePluginString(value.Value)
 	}
 	// Object form
 	var raw struct {
@@ -152,6 +162,24 @@ func (e *pluginManifestEntry) UnmarshalYAML(value *yaml.Node) error {
 	e.ToolGrants = raw.ToolGrants
 	e.Exclude = raw.Exclude
 	return nil
+}
+
+// parsePluginString dispatches a string-form plugin entry based on its prefix.
+func (e *pluginManifestEntry) parsePluginString(s string) error {
+	switch {
+	case strings.HasPrefix(s, "git:"):
+		return e.parseRepoString(strings.TrimPrefix(s, "git:"))
+	case strings.HasPrefix(s, "path:"):
+		e.localPath = strings.TrimPrefix(s, "path:")
+		return nil
+	case strings.HasPrefix(s, "clawhub:"):
+		log.Printf("[plugins] WARNING: clawhub: entries are not yet supported in the plugins: section (skipping %q)", s)
+		return nil
+	default:
+		// Legacy bare "owner/repo" form — still functional, but deprecated.
+		log.Printf("[plugins] DEPRECATED: bare plugin entry %q; use git:%s", s, s)
+		return e.parseRepoString(s)
+	}
 }
 
 // parseRepoString parses "owner/repo[:dir][@ref]" into the entry's fields.
@@ -228,23 +256,39 @@ func resolvePluginPathsFromLocalPath(localPath string) []string {
 	return paths
 }
 
-// loadManifestPlugins reads state/system/plugins.yaml and ensures each listed
-// repo is cloned under ~/.cache/bud/plugins/. It returns the resolved local
-// paths to pass to WithLocalPlugin.
+// extensionsManifestPath returns the path to the extensions manifest file.
+// Checks for extensions.yaml first; falls back to the legacy plugins.yaml with
+// a one-time deprecation log if only the old file exists.
+func extensionsManifestPath(statePath string) string {
+	newPath := filepath.Join(statePath, "system", "extensions.yaml")
+	if _, err := os.Stat(newPath); err == nil {
+		return newPath
+	}
+	oldPath := filepath.Join(statePath, "system", "plugins.yaml")
+	if _, err := os.Stat(oldPath); err == nil {
+		log.Printf("[extensions] DEPRECATED: plugins.yaml found; rename to extensions.yaml")
+		return oldPath
+	}
+	return newPath // caller handles not-exist gracefully
+}
+
+// loadManifestPlugins reads the plugins: section of extensions.yaml (or the
+// legacy plugins.yaml) and ensures each listed repo is cloned under
+// ~/.cache/bud/plugins/. Returns the resolved local paths for --plugin-dir.
 // Errors are logged and the failing entry is skipped — startup continues.
 func loadManifestPlugins(statePath string) []string {
-	manifestPath := filepath.Join(statePath, "system", "plugins.yaml")
+	manifestPath := extensionsManifestPath(statePath)
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			log.Printf("[plugins] failed to read plugins.yaml: %v", err)
+			log.Printf("[plugins] failed to read extensions manifest: %v", err)
 		}
 		return nil
 	}
 
 	var manifest pluginManifest
 	if err := yaml.Unmarshal(data, &manifest); err != nil {
-		log.Printf("[plugins] failed to parse plugins.yaml: %v", err)
+		log.Printf("[plugins] failed to parse extensions manifest: %v", err)
 		return nil
 	}
 
@@ -329,12 +373,12 @@ func loadManifestPlugins(statePath string) []string {
 	return paths
 }
 
-// resolvedManifestPluginDirs reads state/system/plugins.yaml and returns the
+// resolvedManifestPluginDirs reads the extensions manifest and returns the
 // already-cloned plugin directories with their associated tool grants. No git
 // operations — only returns dirs that already exist on disk. Expands monorepo
 // entries one level deep (see resolvePluginPathsFromLocalPath).
 func resolvedManifestPluginDirs(statePath string) []pluginDir {
-	manifestPath := filepath.Join(statePath, "system", "plugins.yaml")
+	manifestPath := extensionsManifestPath(statePath)
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return nil
@@ -395,21 +439,44 @@ func resolvedManifestPluginPaths(statePath string) []string {
 	return paths
 }
 
-// allPluginDirs returns all plugin directories: local (state/system/plugins/) and
-// manifest-cloned (~/Library/Caches/bud/plugins/). Used to pass --plugin-dir to
-// subagents and to search for skill content.
+// allPluginDirs returns all directories searched for skill content:
+//   - local plugins (state/system/plugins/)
+//   - manifest git-plugins (~/Library/Caches/bud/plugins/)
+//   - manifest git-skills (same cache, different subpaths)
+//   - manifest local-path skills
+//   - ClaWHub skills virtual dir (~/Library/Caches/bud/skills-clawhub)
+//
+// Used to pass --plugin-dir to subagents and to search for skill content.
 func allPluginDirs(statePath string) []string {
-	return append(scanLocalPlugins(statePath), resolvedManifestPluginPaths(statePath)...)
+	dirs := append(scanLocalPlugins(statePath), resolvedManifestPluginPaths(statePath)...)
+	dirs = append(dirs, resolvedManifestSkillDirs(statePath)...)
+	if cacheBase, err := os.UserCacheDir(); err == nil {
+		chDir := clawhubSkillsDir(cacheBase)
+		if _, err := os.Stat(filepath.Join(chDir, "skills")); err == nil {
+			dirs = append(dirs, chDir)
+		}
+	}
+	return dirs
 }
 
 // allPluginDirsForAgents returns all plugin directories with their associated
-// tool grants. Local plugins have no grants; manifest plugins carry their grants.
+// tool grants. Local plugins and skill dirs have no grants; manifest plugins
+// carry their grants from plugins.yaml tool_grants entries.
 func allPluginDirsForAgents(statePath string) []pluginDir {
 	var dirs []pluginDir
 	for _, p := range scanLocalPlugins(statePath) {
 		dirs = append(dirs, pluginDir{Path: p})
 	}
 	dirs = append(dirs, resolvedManifestPluginDirs(statePath)...)
+	for _, p := range resolvedManifestSkillDirs(statePath) {
+		dirs = append(dirs, pluginDir{Path: p})
+	}
+	if cacheBase, err := os.UserCacheDir(); err == nil {
+		chDir := clawhubSkillsDir(cacheBase)
+		if _, err := os.Stat(filepath.Join(chDir, "skills")); err == nil {
+			dirs = append(dirs, pluginDir{Path: chDir})
+		}
+	}
 	return dirs
 }
 
@@ -591,6 +658,10 @@ type SimpleSession struct {
 	localPlugins    []string
 	manifestPlugins []string
 	pluginsComputed bool
+
+	// How often floating ClaWHub skills are re-fetched (0 = auto-update disabled).
+	// Set by NewExecutiveV2 from BudConfig.Extensions.ParsedUpdateInterval().
+	extensionsUpdateInterval time.Duration
 }
 
 // NewSimpleSession creates a new simple session manager
@@ -612,6 +683,7 @@ func (s *SimpleSession) cachedPlugins() (localPlugins, manifestPlugins []string)
 	}
 	s.localPlugins = scanLocalPlugins(s.statePath)
 	s.manifestPlugins = loadManifestPlugins(s.statePath)
+	loadManifestSkills(s.statePath, s.extensionsUpdateInterval)
 	s.pluginsComputed = true
 	return s.localPlugins, s.manifestPlugins
 }

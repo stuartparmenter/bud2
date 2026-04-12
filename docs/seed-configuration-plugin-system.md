@@ -13,7 +13,7 @@ score: 0.32
 
 ## Summary
 
-The seed system bootstraps Bud's live configuration from a set of versioned template files in `seed/`. On first run, seeds are copied once into `state/system/`; after that, the state directory is the live config and seeds are ignored. The plugin system extends this through two complementary loading paths: **local plugins** (always-bundled core plugins in `state/system/plugins/`) and **manifest plugins** (external GitHub repos or local paths declared in `state/system/plugins.yaml`, cloned/updated at startup into an OS cache dir). Agent definitions, tool grants, and skill access are controlled through a layered set of YAML files that hot-reload without a daemon restart.
+The seed system bootstraps Bud's live configuration from a set of versioned template files in `seed/`. On first run, seeds are copied once into `state/system/`; after that, the state directory is the live config and seeds are ignored. The plugin system extends this through two complementary loading paths: **local plugins** (always-bundled core plugins in `state/system/plugins/`) and **manifest extensions** (external GitHub repos, ClaWHub skills, or local paths declared in `state/system/extensions.yaml`, cloned/downloaded at startup into an OS cache dir). Agent definitions, tool grants, and skill access are controlled through a layered set of YAML files that hot-reload without a daemon restart.
 
 ## Key Data Structures
 
@@ -23,8 +23,22 @@ Parsed from YAML frontmatter + markdown body in agent files. Fields: `Name strin
 ### `AgentDefinition` (`github.com/severity1/claude-agent-sdk-go`)
 The SDK type used to register agents. Fields: `Description string`, `Prompt string` (assembled from agent body + skill content), `Tools []string`, `Model AgentModel`. Returned by `LoadAllAgents()` and passed to Claude sessions via `WithAgents`.
 
-### `pluginManifestEntry` (`internal/executive/simple_session.go:58`)
-A single entry in `plugins.yaml`. Supports string form (`"owner/repo[:dir][@ref]"`) or object form with fields: `repo`, `dir`, `ref`, `path` (local path override), `tool_grants` (pattern → tool list), `exclude` (sub-plugin names to skip). Remote entries are cloned under `~/Library/Caches/bud/plugins/<owner>/<repo>/`; `path:` entries use the local filesystem directly.
+### `pluginManifestEntry` (`internal/executive/simple_session.go`)
+A single entry in the `plugins:` section of `extensions.yaml`. Supports explicit-prefix string form or object form:
+- `git:owner/repo[:dir][@ref]` — GitHub repo (preferred string form)
+- `path:/local/path` — local filesystem
+- `owner/repo[:dir][@ref]` — legacy bare form (deprecated; logs a warning)
+
+Object form fields: `repo`, `dir`, `ref`, `path`, `tool_grants` (agent-pattern → tool list), `exclude` (sub-plugin names to skip). Remote entries are cloned under `~/Library/Caches/bud/plugins/<owner>/<repo>/`; `path:` entries use the local filesystem directly.
+
+### `skillManifestEntry` (`internal/executive/extensions.go`)
+A single entry in the `skills:` section of `extensions.yaml`. Supports three source types via explicit prefix:
+- `clawhub:slug[@version]` — ClaWHub registry (HTTP zip download; slugs are globally unique; owner prefix ignored)
+- `clawhub:https://clawhub.ai/owner/slug[@version]` — full browser URL form
+- `git:owner/repo[:dir][@ref]` — GitHub repo (sparse checkout when `dir` is set); shares clone cache with plugins
+- `path:/local/path` — local filesystem
+
+Object form uses the source type as the key name (`clawhub:`, `git:`, `path:`). ClaWHub skills are extracted to `~/Library/Caches/bud/skills-clawhub/skills/<slug>/` preserving the zip's full directory tree. Floating ClaWHub skills are re-fetched based on `ExtensionsConfig.UpdateInterval` (default: 1 hour, configured in `bud.yaml` under `extensions.update_interval`).
 
 ### `pluginDir` (`internal/executive/simple_session.go:130`)
 Associates a local filesystem path with any tool grants from its manifest entry (`ToolGrants map[string][]string`). Used when loading agent definitions so grants can be applied per-plugin rather than globally.
@@ -46,7 +60,11 @@ A one-shot copy function: if `state/system/<dirName>` does not exist, copies `se
 
 3. **Every startup — MCP config and wakeup**: `writeMCPConfig()` regenerates `state/.mcp.json` with the current HTTP MCP port (default 8066, bound synchronously before the P1 goroutine starts). `wakeup.md` is re-read fresh from `seed/wakeup.md` into memory on each startup.
 
-4. **Manifest plugin loading (`loadManifestPlugins`)**: `simple_session.go:loadManifestPlugins` reads `state/system/plugins.yaml`. For each remote entry (`owner/repo`): if the repo hasn't been cloned, `git clone --depth=1` into `~/Library/Caches/bud/plugins/<owner>/<repo>/`; if it exists, `git fetch && git checkout` to stay current. For `path:` entries the local path is used directly. Each resolved path is then passed to `resolvePluginPathsFromLocalPath`, which either returns the path itself (if it looks like a plugin dir) or expands one level deep for monorepo-style repos. The `exclude:` list is applied during `resolvedManifestPluginDirs()` — named sub-plugin directories are skipped before the path list is returned.
+4. **Manifest extension loading**: `simple_session.go:cachedPlugins()` (called once per process) reads `state/system/extensions.yaml` (falling back to `plugins.yaml` with a deprecation warning if the new file doesn't exist) and runs two loaders:
+   - **`loadManifestPlugins`**: for each `plugins:` entry — `git clone --depth=1` or `git fetch && checkout` for remote repos; local `path:` entries used directly. Paths passed to `WithLocalPlugin` for the CLI session.
+   - **`loadManifestSkills`**: for each `skills:` entry — ClaWHub entries are downloaded as a zip and extracted to `~/Library/Caches/bud/skills-clawhub/skills/<slug>/`; git entries share the plugin clone cache (using `--sparse` checkout when `dir` is set); local `path:` entries used directly. Skills are discovered by `allPluginDirs` via `resolvedManifestSkillDirs` (git/local) and a virtual plugin dir at `~/Library/Caches/bud/skills-clawhub` (ClaWHub).
+   
+   The `exclude:` list is applied during `resolvedManifestPluginDirs()` — named sub-plugin directories are skipped before the path list is returned.
 
 5. **Zettel library generation (`generateZettelLibraries`)**: Called inside `SendPrompt` after manifest plugins are loaded (once per session). Scans all plugin dirs for `plugin.json` entries that declare a `"zettels"` path and writes `state/system/zettel-libraries.yaml`. Plugins from the OS cache directory are always marked `readonly: true` to prevent accidental commits into cached clones.
 
@@ -54,7 +72,7 @@ A one-shot copy function: if `state/system/<dirName>` does not exist, copies `se
 
 7. **Plugin discovery — SDK path (`LoadAllAgents`)**: On each session start, `loadAgentDefs()` calls `LoadAllAgents(statePath, knownTools)`. This calls `allPluginDirsForAgents` (local + manifest, with tool grants attached) and scans each dir's `agents/*.yaml|.md` for agent definitions. For each agent, skill resolution uses `resolveGrantedSkills(grants, key)` first (skill-grants.yaml wins); if no match, falls back to `agent.Skills`. Skill content is loaded via `LoadSkillContent(allPluginDirs(statePath), skillName)`, which searches both local and manifest plugin dirs. Tool grants from the plugin's manifest entry are applied per-agent via `expandToolGrants`, which expands glob wildcards (e.g. `"mcp__bud2__gk_*"`) against `knownTools` (set by `exec.SetKnownMCPTools` after MCP server init).
 
-8. **Live reload**: Agent definitions are re-loaded on every session start (not cached), so edits to `state/system/plugins/*/agents/` or changes to `plugins.yaml` take effect without restarting Bud. Reflexes are hot-reloaded when their file mod time changes (checked on each percept).
+8. **Live reload**: Agent definitions are re-loaded on every session start (not cached), so edits to `state/system/plugins/*/agents/` or changes to `extensions.yaml` take effect without restarting Bud. New `plugins:` or `skills:` entries are cloned/downloaded on the next process start (manifest loading is cached per-process). Reflexes are hot-reloaded when their file mod time changes (checked on each percept).
 
 ## Design Decisions
 
@@ -84,8 +102,9 @@ A one-shot copy function: if `state/system/<dirName>` does not exist, copies `se
 |------|----|--------------------------|
 | `cmd/bud/main.go` | `seed/` | One-time bootstrap copy of guides, workflows, plugins via `seedSystemDir` |
 | `cmd/bud/main.go` | `seed/wakeup.md` | Read on each startup; string passed to `ExecutiveV2Config.WakeupInstructions` |
-| `internal/executive/simple_session.go` | `state/system/plugins.yaml` | `loadManifestPlugins` reads manifest, clones/updates repos into OS cache |
-| `internal/executive/simple_session.go` | `~/Library/Caches/bud/plugins/` | Cache dir for cloned GitHub plugin repos; auto-readonly in zettel-libraries |
+| `internal/executive/simple_session.go` | `state/system/extensions.yaml` | `loadManifestPlugins` + `loadManifestSkills` read manifest, clone/download into OS cache |
+| `internal/executive/simple_session.go` | `~/Library/Caches/bud/plugins/` | Cache dir for cloned GitHub plugin and skill repos; auto-readonly in zettel-libraries |
+| `internal/executive/simple_session.go` | `~/Library/Caches/bud/skills-clawhub/` | Cache dir for ClaWHub skill zips; virtual plugin dir searched by `LoadSkillContent` |
 | `internal/executive/simple_session.go` | `state/system/plugins/` | `scanLocalPlugins` returns plugin paths for `--plugin-dir` CLI flags |
 | `internal/executive/agent_defs.go` | `state/system/skill-grants.yaml` | `LoadSkillGrants` reads centralized agent→skill map |
 | `internal/executive/agent_defs.go` | all plugin dirs (local + manifest) | `LoadAllAgents` builds `AgentDefinition` map; `expandToolGrants` expands tool wildcards |
@@ -116,6 +135,7 @@ A one-shot copy function: if `state/system/<dirName>` does not exist, copies `se
 - `internal/executive/simple_session.go:181` — `loadManifestPlugins`: GitHub clone/update, local path, exclude list logic
 - `internal/executive/simple_session.go:286` — `resolvedManifestPluginDirs`: exclude filtering and tool grants attachment
 - `internal/executive/agent_defs.go` — `LoadAllAgents`, `LoadSkillGrants`, `resolveGrantedSkills`, `expandToolGrants`
-- `internal/executive/profiles.go` — `LoadSkillContent` (multi-dir search) and `ResolveSubagentConfig`
-- `state/system/plugins.yaml` — the live manifest; edit here to add/exclude plugins or configure tool grants
+- `internal/executive/profiles.go` — `LoadSkillContent` (multi-dir search with collision warnings) and `ResolveSubagentConfig`
+- `internal/executive/extensions.go` — `skillManifestEntry`, `loadManifestSkills`, `downloadClawhubSkill`, `cloneOrUpdateGitSkillEntry`
+- `state/system/extensions.yaml` — the live manifest; add `plugins:` entries for full plugin repos, `skills:` entries for standalone skills (ClaWHub, git, local)
 - `state/system/skill-grants.yaml` — centralized agent→skill grants; edit here to change which skills an agent type can invoke

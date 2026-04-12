@@ -3,7 +3,7 @@ topic: Plugin Manifest Runtime & Tool Grants
 repo: bud2
 generated_at: 2026-04-08T09:00:00Z
 commit: c459af0
-key_modules: [cmd/bud, internal/executive/simple_session.go, state/system/plugins.yaml]
+key_modules: [cmd/bud, internal/executive/simple_session.go, internal/executive/extensions.go, state/system/extensions.yaml]
 score: 0.54
 ---
 
@@ -13,26 +13,46 @@ score: 0.54
 
 ## Summary
 
-The plugin manifest system allows external GitHub repos and local filesystem paths to register agent definitions, skills, zettel libraries, and per-agent tool grants into bud2 at runtime without modifying core configuration. At startup, `loadManifestPlugins` clones or updates each listed remote repo to `~/.cache/bud/plugins/` and resolves local paths directly; at agent-spawn time, `allPluginDirsForAgents` re-reads the already-cloned directories with their tool grants, applying any `exclude:` filters before handing plugin dirs to the agent-definition loader. Additionally, `generateZettelLibraries` scans all plugin dirs at each prompt invocation to regenerate `state/system/zettel-libraries.yaml`, wiring zettel paths declared in `plugin.json` files into the running system.
+The extensions manifest system allows external GitHub repos, ClaWHub skills, and local filesystem paths to register agent definitions, skills, zettel libraries, and per-agent tool grants into bud2 at runtime without modifying core configuration. The manifest file is `state/system/extensions.yaml` (replaces the former `plugins.yaml`; the old name still works with a deprecation warning). It has two top-level sections: `plugins:` for full plugin repos (agents + skills + tool grants) and `skills:` for standalone skill-only packages. At startup, `loadManifestPlugins` clones or updates each `plugins:` entry and `loadManifestSkills` downloads/clones each `skills:` entry; at agent-spawn time, `allPluginDirsForAgents` re-reads the already-cached directories with their tool grants, applying any `exclude:` filters before handing plugin dirs to the agent-definition loader. Additionally, `generateZettelLibraries` scans all plugin dirs at each prompt invocation to regenerate `state/system/zettel-libraries.yaml`, wiring zettel paths declared in `plugin.json` files into the running system.
 
 ## Key Data Structures
 
-### `pluginManifest` / `pluginManifestEntry` (`internal/executive/simple_session.go`)
+### `pluginManifest` / `pluginManifestEntry` / `skillManifestEntry` (`internal/executive/simple_session.go`, `extensions.go`)
 
-`pluginManifest` is the in-memory representation of `state/system/plugins.yaml`. Each `pluginManifestEntry` captures one plugin source:
+`pluginManifest` is the in-memory representation of `state/system/extensions.yaml`. It has two slices:
+
+```go
+type pluginManifest struct {
+    Plugins []pluginManifestEntry `yaml:"plugins"`
+    Skills  []skillManifestEntry  `yaml:"skills"`
+}
+```
+
+Each `pluginManifestEntry` captures one plugin source. String form supports explicit prefixes:
+- `git:owner/repo[:dir][@ref]` — preferred
+- `path:/local/path`
+- `owner/repo[:dir][@ref]` — legacy bare form, logs deprecation warning
 
 ```go
 type pluginManifestEntry struct {
-    owner, repo  string              // remote GitHub repo (e.g. "vthunder", "useful-plugins")
+    owner, repo  string              // remote GitHub repo
     dir          string              // subdirectory within repo (empty = root)
     ref          string              // branch/tag/commit (empty = default branch)
     localPath    string              // alternative: local filesystem path
     ToolGrants   map[string][]string // agent pattern → list of tool names (may include wildcards)
-    Exclude      []string            // sub-plugin directory names to skip (e.g. "issues-linear")
+    Exclude      []string            // sub-plugin directory names to skip
 }
 ```
 
-`ToolGrants` is the security boundary: it declares which MCP tools agents from this plugin are allowed to invoke. `Exclude` lets a manifest entry opt out of specific sub-plugins without forking the manifest or the upstream repo.
+`ToolGrants` is the security boundary for plugins. `Exclude` lets a manifest entry suppress individual sub-plugins.
+
+Each `skillManifestEntry` captures one standalone skill source. String form requires a prefix:
+- `clawhub:slug[@version]` — ClaWHub registry; slug is globally unique; owner prefix ignored
+- `clawhub:https://clawhub.ai/owner/slug[@version]` — full browser URL accepted
+- `git:owner/repo[:dir][@ref]` — GitHub repo (shares clone cache with plugins; uses sparse checkout when `dir` set)
+- `path:/local/path`
+
+Object form uses the source type as the YAML key (`clawhub:`, `git:`, `path:`). Standalone skills have no `tool_grants` — agents provide tool access, not the skill itself.
 
 ### `pluginDir` (`internal/executive/simple_session.go`)
 
@@ -95,7 +115,7 @@ type Agent struct {
 
 Called once during `main()` before the SDK session is created. Returns a list of local paths to pass to `WithLocalPlugin`.
 
-1. **Read manifest**: `loadManifestPlugins(statePath)` reads `state/system/plugins.yaml`. Parse errors are logged and the function returns nil (non-fatal).
+1. **Read manifest**: `loadManifestPlugins(statePath)` reads `state/system/extensions.yaml` (via `extensionsManifestPath`, which falls back to `plugins.yaml` with a deprecation warning). Parse errors are logged and the function returns nil (non-fatal).
 
 2. **Resolve cache dir**: `pluginCacheDir = ~/.cache/bud/plugins/` (via `os.UserCacheDir()`).
 
@@ -126,7 +146,7 @@ This stores the full list of live MCP tool names on the executive. These names a
 
 Called inside `SendPrompt` (via `allPluginDirsForAgents`) on every prompt, with no git operations. This is the hot-path read of the already-cloned plugins.
 
-For each entry in `plugins.yaml`:
+For each entry in `extensions.yaml` `plugins:` section:
 1. Resolve `localPath` (same logic as Phase 1 but without git ops).
 2. Build `excludeSet` from `e.Exclude` (a `map[string]bool` keyed by directory basename).
 3. Call `resolvePluginPathsFromLocalPath(localPath)` to enumerate plugin dirs.
@@ -188,17 +208,17 @@ If none match, returns `(nil, false)` — the agent's own `Skills` field is used
 
 - **Startup cloning, on-demand agent loading**: `loadManifestPlugins` (with git ops) runs once at startup. `resolvedManifestPluginDirs` (no git, read-only) is called whenever agent definitions are needed. This avoids git operations on the hot path while keeping plugin content current.
 
-- **`exclude:` at load time, not clone time**: The exclude list is evaluated by `resolvedManifestPluginDirs`, not during the initial git clone. This means you can add or remove sub-plugins from consideration (e.g., disable `issues-linear`) just by editing `plugins.yaml` — no restart required for the filter change to apply.
+- **`exclude:` at load time, not clone time**: The exclude list is evaluated by `resolvedManifestPluginDirs`, not during the initial git clone. This means you can add or remove sub-plugins from consideration (e.g., disable `issues-linear`) just by editing `extensions.yaml` — no restart required for the filter change to apply.
 
 - **Zettel libraries regenerated on every prompt**: `generateZettelLibraries` runs inside `SendPrompt` so new plugins' zettel declarations take effect on the next wake without daemon restart. The tradeoff is a small file I/O cost per prompt.
 
 - **Cache clones are always readonly in zettel-libraries**: Any plugin dir under the OS cache path (`~/.cache/bud/plugins/`) is marked `readonly: true` in `zettel-libraries.yaml` regardless of what `plugin.json` says. This prevents accidental commits into externally-managed checkouts.
 
-- **Tool grants live in plugins.yaml, not skill-grants.yaml**: Plugin authors control which MCP tools their agents can use via `tool_grants` in the manifest. Core configuration (`skill-grants.yaml`) controls which skills agents get. This separates external trust grants from internal skill assignment.
+- **Tool grants live in extensions.yaml `plugins:`, not `skill-grants.yaml`**: Plugin authors control which MCP tools their agents can use via `tool_grants` in the manifest. Core configuration (`skill-grants.yaml`) controls which skills agents get. This separates external trust grants from internal skill assignment. Standalone skills in the `skills:` section carry no `tool_grants` — agents provide tool access.
 
 - **Wildcard expansion against live tool list**: `expandToolGrants` resolves patterns like `mcp__bud2__gk_*` against registered MCP tool names at agent-load time. When a new gk tool is added to the MCP server, any agent with a matching wildcard grant automatically gets access — no manifest change required.
 
-- **Local plugins (`state/system/plugins/`) cannot have tool grants**: Only manifest entries (in `plugins.yaml`) carry `ToolGrants`. Agents in local plugin dirs can only access tools declared in their `tools:` YAML field.
+- **Local plugins (`state/system/plugins/`) cannot have tool grants**: Only manifest entries (in `extensions.yaml` `plugins:` section) carry `ToolGrants`. Agents in local plugin dirs can only access tools declared in their `tools:` YAML field.
 
 ## Integration Points
 
@@ -220,7 +240,7 @@ If none match, returns `(nil, false)` — the agent's own `Skills` field is used
 
 - **A single manifest entry can expand to many plugin dirs**: If `useful-plugins` is listed with no `dir:`, and it contains `dev-docs/`, `bud-ops/`, etc., each becomes a separate `pluginDir` inheriting the same `ToolGrants` from that manifest entry. Combine this with `exclude:` to selectively suppress individual sub-plugins.
 
-- **Tool grants are not applied during `loadManifestPlugins`**: The cloning phase returns only plain paths. Tool grants are read separately by `resolvedManifestPluginDirs()` when building agent definitions. If you change a `tool_grants:` entry in plugins.yaml while bud is running, the change is picked up on the next agent-load without restart.
+- **Tool grants are not applied during `loadManifestPlugins`**: The cloning phase returns only plain paths. Tool grants are read separately by `resolvedManifestPluginDirs()` when building agent definitions. If you change a `tool_grants:` entry in `extensions.yaml` while bud is running, the change is picked up on the next agent-load without restart.
 
 - **`skill-grants.yaml` absence is non-fatal**: If the file doesn't exist, `LoadSkillGrants` returns empty grants and every agent falls back to its own `skills:` field. The system works as before the file was introduced — backward compatible.
 
@@ -230,8 +250,9 @@ If none match, returns `(nil, false)` — the agent's own `Skills` field is used
 
 ## Start Here
 
-- `internal/executive/simple_session.go` — read `loadManifestPlugins`, `resolvedManifestPluginDirs`, `generateZettelLibraries`, `expandToolGrants`, and `matchesAgentPattern` to understand the full plugin discovery, exclude filtering, grant expansion, and zettel generation pipeline
-- `state/system/plugins.yaml` — the live manifest driving cloning, dir resolution, `exclude:` filtering, and tool grant declarations for external plugins
-- `internal/executive/agent_defs.go` — `LoadAllAgents` is the integration point combining plugin dirs, skill grants, and tool grants into `claudecode.AgentDefinition` objects
+- `internal/executive/simple_session.go` — `loadManifestPlugins`, `resolvedManifestPluginDirs`, `allPluginDirs`, `allPluginDirsForAgents`, `generateZettelLibraries`, `expandToolGrants`, `matchesAgentPattern`
+- `internal/executive/extensions.go` — `skillManifestEntry`, `loadManifestSkills`, `downloadClawhubSkill`, `cloneOrUpdateGitSkillEntry`, `resolvedManifestSkillDirs`, `clawhubSkillsDir`
+- `state/system/extensions.yaml` — the live manifest; `plugins:` for full plugin repos with tool grants, `skills:` for standalone ClaWHub/git/local skills
+- `internal/executive/agent_defs.go` — `LoadAllAgents` combines plugin dirs, skill grants, and tool grants into `claudecode.AgentDefinition` objects
 - `state/system/skill-grants.yaml` — centralized skill assignment; the `"bud:*": []` and `"*":` entries reveal override precedence
-- `internal/executive/profiles.go` — `resolveGrantedSkills`, `LoadSkillContent`, `Agent` type, and `AgentAliases` for understanding how skill names resolve to file content
+- `internal/executive/profiles.go` — `resolveGrantedSkills`, `LoadSkillContent` (warns on collisions), `Agent` type, `AgentAliases`

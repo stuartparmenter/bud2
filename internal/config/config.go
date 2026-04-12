@@ -4,14 +4,38 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+// ExtensionsConfig controls how remote extensions (plugins and skills) are
+// fetched and updated.
+type ExtensionsConfig struct {
+	// UpdateInterval is a Go duration string (e.g. "1h", "30m", "0") that
+	// controls how often floating (unpinned) remote skills are re-fetched.
+	// "0" disables automatic updates entirely. Default when empty: 1 hour.
+	UpdateInterval string `yaml:"update_interval,omitempty"`
+}
+
+// ParsedUpdateInterval returns the parsed duration, defaulting to 1 hour when
+// UpdateInterval is empty. Returns 0 if the value is "0" (updates disabled).
+func (e ExtensionsConfig) ParsedUpdateInterval() time.Duration {
+	if e.UpdateInterval == "" {
+		return time.Hour
+	}
+	d, err := time.ParseDuration(e.UpdateInterval)
+	if err != nil {
+		return time.Hour // fall back to default on bad config
+	}
+	return d
+}
 
 type BudConfig struct {
 	Providers       map[string]ProviderConfig `yaml:"providers"`
 	Models          map[string]string         `yaml:"models"`
 	TerminalManager string                    `yaml:"terminal_manager,omitempty"`
+	Extensions      ExtensionsConfig          `yaml:"extensions,omitempty"`
 }
 
 type ProviderConfig struct {

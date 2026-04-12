@@ -2,6 +2,7 @@ package executive
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -161,7 +162,9 @@ func LoadAgent(statePath, agentName string) (*Agent, error) {
 
 // LoadSkillContent reads a skill by name, searching the provided plugin directories.
 // Skill name may be "namespace:skill-name" or just "skill-name".
-// Search order: each pluginDir/skills/<name>/SKILL.md, then pluginDir/skills/<name>.md.
+// Search order per dir: pluginDir/skills/<name>/SKILL.md, then pluginDir/skills/<name>.md.
+// If the same skill name is found in more than one dir, a warning is logged and
+// the first match (highest-priority dir) is returned.
 func LoadSkillContent(pluginDirs []string, skillName string) (string, error) {
 	// Normalize: strip namespace prefix if present (e.g. "bud-ops:gk-conventions" → "gk-conventions")
 	shortName := skillName
@@ -169,32 +172,52 @@ func LoadSkillContent(pluginDirs []string, skillName string) (string, error) {
 		shortName = skillName[idx+1:]
 	}
 
-	// Build candidate paths from provided plugin dirs
-	var candidates []string
+	type match struct {
+		path    string
+		content string
+	}
+	var found []match
+
 	for _, dir := range pluginDirs {
-		candidates = append(candidates,
+		for _, p := range []string{
 			filepath.Join(dir, "skills", shortName, "SKILL.md"),
 			filepath.Join(dir, "skills", shortName+".md"),
-		)
-	}
-	for _, p := range candidates {
-		data, err := os.ReadFile(p)
-		if err != nil {
-			continue
-		}
-		content := string(data)
-		// Strip YAML frontmatter (--- ... ---) if present — keep just the body
-		if strings.HasPrefix(content, "---\n") {
-			rest := content[4:]
-			endIdx := strings.Index(rest, "\n---\n")
-			if endIdx != -1 {
-				content = strings.TrimSpace(rest[endIdx+5:])
+		} {
+			data, err := os.ReadFile(p)
+			if err != nil {
+				continue
 			}
+			content := string(data)
+			// Strip YAML frontmatter (--- ... ---) if present — keep just the body
+			if strings.HasPrefix(content, "---\n") {
+				rest := content[4:]
+				if endIdx := strings.Index(rest, "\n---\n"); endIdx != -1 {
+					content = strings.TrimSpace(rest[endIdx+5:])
+				}
+			}
+			found = append(found, match{path: p, content: content})
+			break // at most one match per dir
 		}
-		return content, nil
 	}
 
-	return "", fmt.Errorf("skill %q not found in any plugin dir", skillName)
+	if len(found) == 0 {
+		return "", fmt.Errorf("skill %q not found in any plugin dir", skillName)
+	}
+
+	if len(found) > 1 {
+		paths := make([]string, len(found))
+		for i, m := range found {
+			if i == 0 {
+				paths[i] = m.path + " (used)"
+			} else {
+				paths[i] = m.path + " (shadowed)"
+			}
+		}
+		log.Printf("[skills] WARNING: skill %q found in multiple dirs:\n  %s",
+			skillName, strings.Join(paths, "\n  "))
+	}
+
+	return found[0].content, nil
 }
 
 // JobDef defines a reusable job template.
