@@ -209,7 +209,6 @@ func main() {
 	if claudeModel == "" {
 		claudeModel = "claude-sonnet-4-20250514"
 	}
-	syntheticMode := os.Getenv("SYNTHETIC_MODE") == "true"
 	mcpHTTPPort := os.Getenv("MCP_HTTP_PORT")
 	if mcpHTTPPort == "" {
 		mcpHTTPPort = "8066" // Default MCP HTTP port
@@ -323,9 +322,8 @@ func main() {
 		}
 	}
 
-	// In synthetic mode, Discord is not required
-	if !syntheticMode && discordToken == "" {
-		log.Fatal("DISCORD_TOKEN environment variable required (or set SYNTHETIC_MODE=true)")
+	if discordToken == "" {
+		log.Fatal("DISCORD_TOKEN environment variable required")
 	}
 
 	// Ensure state directory exists
@@ -1114,229 +1112,185 @@ func main() {
 	var discordSense *senses.DiscordSense
 	var discordEffector *effectors.DiscordEffector
 
-	if !syntheticMode {
-		var err error
-		discordSense, err = senses.NewDiscordSense(senses.DiscordConfig{
-			Token:     discordToken,
-			ChannelID: discordChannel,
-			OwnerID:   discordOwner,
-		}, processInboxMessage)
-		if err != nil {
-			log.Fatalf("Failed to create Discord sense: %v", err)
-		}
-
-		if err := discordSense.Start(); err != nil {
-			log.Fatalf("Failed to start Discord sense: %v", err)
-		}
-
-		discordEffector = effectors.NewDiscordEffector(
-			discordSense.Session,
-			nil, // No outbox polling - using direct Submit() only
-		)
-		discordEffector.SetOnSend(captureResponse)
-		discordEffector.SetOnAction(func(actionType, channelID, content, source string) {
-			activityLog.LogAction(fmt.Sprintf("%s: %s", actionType, truncate(content, 80)), source, channelID, content)
-		})
-		discordEffector.SetOnError(func(actionID, actionType, errMsg string) {
-			activityLog.LogError(
-				fmt.Sprintf("Discord %s failed: %s", actionType, truncate(errMsg, 100)),
-				fmt.Errorf("%s", errMsg),
-				map[string]any{"action_id": actionID, "action_type": actionType},
-			)
-		})
-		discordEffector.SetOnRetry(func(actionID, actionType, errMsg string, attempt int, nextRetry time.Duration) {
-			activityLog.Log(activity.Entry{
-				Type:    activity.TypeAction,
-				Summary: fmt.Sprintf("Discord %s retry (attempt %d, next in %v): %s", actionType, attempt, nextRetry, truncate(errMsg, 80)),
-				Data: map[string]any{
-					"action_id":   actionID,
-					"action_type": actionType,
-					"attempt":     attempt,
-					"next_retry":  nextRetry.String(),
-					"error":       errMsg,
-					"retrying":    true,
-				},
-			})
-		})
-		// Wire pending interaction callback for slash command followups
-		discordEffector.SetPendingInteractionCallback(func(channelID string) *effectors.PendingInteraction {
-			if interaction := discordSense.GetPendingInteraction(channelID); interaction != nil {
-				return &effectors.PendingInteraction{
-					Token: interaction.Token,
-					AppID: interaction.AppID,
-				}
-			}
-			return nil
-		})
-		discordEffector.Start()
-
-		// Start health monitor for connection resilience
-		discordSense.SetOnProlongedOutage(func(duration time.Duration) {
-			activityLog.LogError(
-				fmt.Sprintf("Discord disconnected for %v, triggering hard reset", duration.Round(time.Second)),
-				fmt.Errorf("prolonged disconnection"),
-				map[string]any{"duration": duration.String()},
-			)
-		})
-		discordSense.StartHealthMonitor()
-
-		// Wire up typing indicator to executive
-		exec.SetTypingCallbacks(discordEffector.StartTyping, discordEffector.StopTyping)
-
-		// Wire reflex reply callback to effector directly
-		reflexReplyCallback = func(channelID, message string) error {
-			log.Printf("[reflex] Sending reply to channel %s: %s", channelID, truncate(message, 50))
-			action := &types.Action{
-				ID:       fmt.Sprintf("reflex-reply-%d", time.Now().UnixNano()),
-				Type:     "send_message",
-				Effector: "discord",
-				Payload: map[string]any{
-					"channel_id": channelID,
-					"content":    message,
-				},
-				Timestamp: time.Now(),
-			}
-			discordEffector.Submit(action)
-			return nil
-		}
-
-		// Wire MCP talk_to_user to effector directly (bypasses outbox file)
-		mcpSendMessage = func(channelID, message string) error {
-			logging.Info("main", "Sending message: %s", logging.Truncate(message, 50))
-			action := &types.Action{
-				ID:       fmt.Sprintf("mcp-reply-%d", time.Now().UnixNano()),
-				Type:     "send_message",
-				Effector: "discord",
-				Payload: map[string]any{
-					"channel_id": channelID,
-					"content":    message,
-				},
-				Timestamp: time.Now(),
-			}
-			discordEffector.Submit(action)
-			return nil
-		}
-
-		// Wire fallback callback to effector
-		fallbackSendMessage = func(channelID, message string) error {
-			log.Printf("[fallback] Sending fallback message to channel %s", channelID)
-			action := &types.Action{
-				ID:       fmt.Sprintf("fallback-%d", time.Now().UnixNano()),
-				Type:     "send_message",
-				Effector: "discord",
-				Payload: map[string]any{
-					"channel_id": channelID,
-					"content":    message,
-				},
-				Timestamp: time.Now(),
-			}
-			discordEffector.Submit(action)
-			return nil
-		}
-
-		// Wire MCP discord_react to effector directly (bypasses outbox file)
-		mcpAddReaction = func(channelID, messageID, emoji string) error {
-			log.Printf("[mcp] Reacting %s", emoji)
-			action := &types.Action{
-				ID:       fmt.Sprintf("mcp-react-%d", time.Now().UnixNano()),
-				Type:     "add_reaction",
-				Effector: "discord",
-				Payload: map[string]any{
-					"channel_id": channelID,
-					"message_id": messageID,
-					"emoji":      emoji,
-				},
-				Timestamp: time.Now(),
-			}
-			discordEffector.Submit(action)
-			return nil
-		}
-
-		// Wire MCP send_image to effector directly (bypasses outbox file)
-		mcpSendFile = func(channelID, filePath, message string) error {
-			log.Printf("[mcp] Sending file %s", filePath)
-			action := &types.Action{
-				ID:       fmt.Sprintf("mcp-file-%d", time.Now().UnixNano()),
-				Type:     "send_file",
-				Effector: "discord",
-				Payload: map[string]any{
-					"channel_id": channelID,
-					"file_path":  filePath,
-					"message":    message,
-				},
-				Timestamp: time.Now(),
-			}
-			discordEffector.Submit(action)
-			return nil
-		}
-
-		// Wire interaction reply callback for slash commands (edits deferred response)
-		reflexEngine.SetInteractionReplyCallback(func(token, appID, message string) error {
-			log.Printf("[reflex] Editing interaction response: %s", truncate(message, 50))
-			_, err := discordSense.Session().InteractionResponseEdit(&discordgo.Interaction{
-				AppID: appID,
-				Token: token,
-			}, &discordgo.WebhookEdit{
-				Content: &message,
-			})
-			return err
-		})
-
-		// Wire /stop to kill whatever session is currently running
-		discordSense.SetOnStop(exec.InterruptCurrentSession)
-
-		// Wire /debug-executive to toggle the live debug stream
-		dbg := newExecutiveDebugger(exec, discordSense.Session())
-		discordSense.SetOnDebugExecutive(dbg.Toggle)
-
-		// Register slash commands (guild-specific for fast updates, or global if no guild ID)
-		if err := discordSense.RegisterSlashCommands(discordGuildID); err != nil {
-			log.Printf("Warning: failed to register slash commands: %v", err)
-		}
-
-		log.Println("[main] Discord sense and effector started")
-	} else {
-		// SYNTHETIC_MODE: Create test effector that captures to file
-		testEffector := effectors.NewTestEffector(statePath)
-		testEffector.Start()
-
-		// Wire MCP callbacks to test effector
-		mcpSendMessage = func(channelID, message string) error {
-			logging.Info("main", "Sending message (test): %s", logging.Truncate(message, 50))
-			action := &types.Action{
-				ID:       fmt.Sprintf("mcp-reply-%d", time.Now().UnixNano()),
-				Type:     "send_message",
-				Effector: "test",
-				Payload: map[string]any{
-					"channel_id": channelID,
-					"content":    message,
-				},
-				Timestamp: time.Now(),
-			}
-			testEffector.Submit(action)
-			return nil
-		}
-
-		mcpAddReaction = func(channelID, messageID, emoji string) error {
-			log.Printf("[mcp-test] Adding reaction to message %s: %s", messageID, emoji)
-			action := &types.Action{
-				ID:       fmt.Sprintf("mcp-react-%d", time.Now().UnixNano()),
-				Type:     "add_reaction",
-				Effector: "test",
-				Payload: map[string]any{
-					"channel_id": channelID,
-					"message_id": messageID,
-					"emoji":      emoji,
-				},
-				Timestamp: time.Now(),
-			}
-			testEffector.Submit(action)
-			return nil
-		}
-
-		log.Println("[main] SYNTHETIC_MODE enabled - using test effector")
-		log.Println("[main] Write to inbox.jsonl, read from test_output.jsonl")
+	discordSense, err = senses.NewDiscordSense(senses.DiscordConfig{
+		Token:     discordToken,
+		ChannelID: discordChannel,
+		OwnerID:   discordOwner,
+	}, processInboxMessage)
+	if err != nil {
+		log.Fatalf("Failed to create Discord sense: %v", err)
 	}
+
+	if err := discordSense.Start(); err != nil {
+		log.Fatalf("Failed to start Discord sense: %v", err)
+	}
+
+	discordEffector = effectors.NewDiscordEffector(
+		discordSense.Session,
+		nil, // No outbox polling - using direct Submit() only
+	)
+	discordEffector.SetOnSend(captureResponse)
+	discordEffector.SetOnAction(func(actionType, channelID, content, source string) {
+		activityLog.LogAction(fmt.Sprintf("%s: %s", actionType, truncate(content, 80)), source, channelID, content)
+	})
+	discordEffector.SetOnError(func(actionID, actionType, errMsg string) {
+		activityLog.LogError(
+			fmt.Sprintf("Discord %s failed: %s", actionType, truncate(errMsg, 100)),
+			fmt.Errorf("%s", errMsg),
+			map[string]any{"action_id": actionID, "action_type": actionType},
+		)
+	})
+	discordEffector.SetOnRetry(func(actionID, actionType, errMsg string, attempt int, nextRetry time.Duration) {
+		activityLog.Log(activity.Entry{
+			Type:    activity.TypeAction,
+			Summary: fmt.Sprintf("Discord %s retry (attempt %d, next in %v): %s", actionType, attempt, nextRetry, truncate(errMsg, 80)),
+			Data: map[string]any{
+				"action_id":   actionID,
+				"action_type": actionType,
+				"attempt":     attempt,
+				"next_retry":  nextRetry.String(),
+				"error":       errMsg,
+				"retrying":    true,
+			},
+		})
+	})
+	// Wire pending interaction callback for slash command followups
+	discordEffector.SetPendingInteractionCallback(func(channelID string) *effectors.PendingInteraction {
+		if interaction := discordSense.GetPendingInteraction(channelID); interaction != nil {
+			return &effectors.PendingInteraction{
+				Token: interaction.Token,
+				AppID: interaction.AppID,
+			}
+		}
+		return nil
+	})
+	discordEffector.Start()
+
+	// Start health monitor for connection resilience
+	discordSense.SetOnProlongedOutage(func(duration time.Duration) {
+		activityLog.LogError(
+			fmt.Sprintf("Discord disconnected for %v, triggering hard reset", duration.Round(time.Second)),
+			fmt.Errorf("prolonged disconnection"),
+			map[string]any{"duration": duration.String()},
+		)
+	})
+	discordSense.StartHealthMonitor()
+
+	// Wire up typing indicator to executive
+	exec.SetTypingCallbacks(discordEffector.StartTyping, discordEffector.StopTyping)
+
+	// Wire reflex reply callback to effector directly
+	reflexReplyCallback = func(channelID, message string) error {
+		log.Printf("[reflex] Sending reply to channel %s: %s", channelID, truncate(message, 50))
+		action := &types.Action{
+			ID:       fmt.Sprintf("reflex-reply-%d", time.Now().UnixNano()),
+			Type:     "send_message",
+			Effector: "discord",
+			Payload: map[string]any{
+				"channel_id": channelID,
+				"content":    message,
+			},
+			Timestamp: time.Now(),
+		}
+		discordEffector.Submit(action)
+		return nil
+	}
+
+	// Wire MCP talk_to_user to effector directly (bypasses outbox file)
+	mcpSendMessage = func(channelID, message string) error {
+		logging.Info("main", "Sending message: %s", logging.Truncate(message, 50))
+		action := &types.Action{
+			ID:       fmt.Sprintf("mcp-reply-%d", time.Now().UnixNano()),
+			Type:     "send_message",
+			Effector: "discord",
+			Payload: map[string]any{
+				"channel_id": channelID,
+				"content":    message,
+			},
+			Timestamp: time.Now(),
+		}
+		discordEffector.Submit(action)
+		return nil
+	}
+
+	// Wire fallback callback to effector
+	fallbackSendMessage = func(channelID, message string) error {
+		log.Printf("[fallback] Sending fallback message to channel %s", channelID)
+		action := &types.Action{
+			ID:       fmt.Sprintf("fallback-%d", time.Now().UnixNano()),
+			Type:     "send_message",
+			Effector: "discord",
+			Payload: map[string]any{
+				"channel_id": channelID,
+				"content":    message,
+			},
+			Timestamp: time.Now(),
+		}
+		discordEffector.Submit(action)
+		return nil
+	}
+
+	// Wire MCP discord_react to effector directly (bypasses outbox file)
+	mcpAddReaction = func(channelID, messageID, emoji string) error {
+		log.Printf("[mcp] Reacting %s", emoji)
+		action := &types.Action{
+			ID:       fmt.Sprintf("mcp-react-%d", time.Now().UnixNano()),
+			Type:     "add_reaction",
+			Effector: "discord",
+			Payload: map[string]any{
+				"channel_id": channelID,
+				"message_id": messageID,
+				"emoji":      emoji,
+			},
+			Timestamp: time.Now(),
+		}
+		discordEffector.Submit(action)
+		return nil
+	}
+
+	// Wire MCP send_image to effector directly (bypasses outbox file)
+	mcpSendFile = func(channelID, filePath, message string) error {
+		log.Printf("[mcp] Sending file %s", filePath)
+		action := &types.Action{
+			ID:       fmt.Sprintf("mcp-file-%d", time.Now().UnixNano()),
+			Type:     "send_file",
+			Effector: "discord",
+			Payload: map[string]any{
+				"channel_id": channelID,
+				"file_path":  filePath,
+				"message":    message,
+			},
+			Timestamp: time.Now(),
+		}
+		discordEffector.Submit(action)
+		return nil
+	}
+
+	// Wire interaction reply callback for slash commands (edits deferred response)
+	reflexEngine.SetInteractionReplyCallback(func(token, appID, message string) error {
+		log.Printf("[reflex] Editing interaction response: %s", truncate(message, 50))
+		_, err := discordSense.Session().InteractionResponseEdit(&discordgo.Interaction{
+			AppID: appID,
+			Token: token,
+		}, &discordgo.WebhookEdit{
+			Content: &message,
+		})
+		return err
+	})
+
+	// Wire /stop to kill whatever session is currently running
+	discordSense.SetOnStop(exec.InterruptCurrentSession)
+
+	// Wire /debug-executive to toggle the live debug stream
+	dbg := newExecutiveDebugger(exec, discordSense.Session())
+	discordSense.SetOnDebugExecutive(dbg.Toggle)
+
+	// Register slash commands (guild-specific for fast updates, or global if no guild ID)
+	if err := discordSense.RegisterSlashCommands(discordGuildID); err != nil {
+		log.Printf("Warning: failed to register slash commands: %v", err)
+	}
+
+	log.Println("[main] Discord sense and effector started")
 
 	// Send startup message so future sessions can tell when a restart happened
 	if mcpSendMessage != nil && discordChannel != "" {
