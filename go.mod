@@ -4,9 +4,9 @@ go 1.25.0
 
 require (
 	github.com/bwmarrin/discordgo v0.29.0
-	github.com/itchyny/gojq v0.12.18
+	github.com/itchyny/gojq v0.12.19
 	github.com/joho/godotenv v1.5.1
-	github.com/mark3labs/mcp-go v0.46.0
+	github.com/mark3labs/mcp-go v0.47.0
 	github.com/severity1/claude-agent-sdk-go v0.6.12
 	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/vthunder/efficient-notion-mcp v0.0.0-20260120161249-c4afc21ea562
@@ -18,7 +18,7 @@ require (
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/itchyny/timefmt-go v0.1.7 // indirect
+	github.com/itchyny/timefmt-go v0.1.8 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/shoenig/go-m1cpu v0.1.7 // indirect
