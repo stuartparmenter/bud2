@@ -62,15 +62,6 @@ func TestIsEnabled_Minimal(t *testing.T) {
 	}
 }
 
-func TestGetLevel(t *testing.T) {
-	for _, level := range []ProfilingLevel{LevelOff, LevelMinimal, LevelDetailed, LevelTrace} {
-		p := newTestProfiler(level, "")
-		if p.GetLevel() != level {
-			t.Errorf("GetLevel() = %q, want %q", p.GetLevel(), level)
-		}
-	}
-}
-
 // --- ShouldProfile ---
 
 func TestShouldProfile_Disabled(t *testing.T) {
@@ -246,35 +237,6 @@ func TestStart_MeasuresDuration(t *testing.T) {
 }
 
 // --- StartWithMetadata ---
-
-func TestStartWithMetadata_WritesMetadata(t *testing.T) {
-	f, err := os.CreateTemp(t.TempDir(), "profiling-*.jsonl")
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.Close()
-
-	p := newTestProfiler(LevelMinimal, f.Name())
-	defer p.Close()
-
-	meta := map[string]interface{}{"source": "test"}
-	stop := p.StartWithMetadata("msg-4", "meta_stage", meta)
-	stop()
-
-	timings := readTimings(t, f.Name())
-	if len(timings) != 1 {
-		t.Fatalf("expected 1 timing, got %d", len(timings))
-	}
-	if timings[0].Metadata["source"] != "test" {
-		t.Errorf("Metadata[source] = %v, want %q", timings[0].Metadata["source"], "test")
-	}
-}
-
-func TestStartWithMetadata_ReturnsNoop_WhenDisabled(t *testing.T) {
-	p := newTestProfiler(LevelOff, "")
-	stop := p.StartWithMetadata("msg", "stage", map[string]interface{}{"k": "v"})
-	stop() // must not panic
-}
 
 // --- Close ---
 

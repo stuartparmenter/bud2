@@ -100,18 +100,6 @@ func (p *Profiler) Start(messageID, stage string) func() {
 	}
 }
 
-// StartWithMetadata begins timing a stage with additional metadata
-func (p *Profiler) StartWithMetadata(messageID, stage string, metadata map[string]interface{}) func() {
-	if !p.enabled {
-		return func() {}
-	}
-
-	start := time.Now()
-	return func() {
-		p.Record(messageID, stage, time.Since(start), metadata)
-	}
-}
-
 // Record records a timing measurement
 func (p *Profiler) Record(messageID, stage string, duration time.Duration, metadata map[string]interface{}) {
 	if !p.enabled {
@@ -157,7 +145,3 @@ func (p *Profiler) IsEnabled() bool {
 	return p.enabled
 }
 
-// GetLevel returns the current profiling level
-func (p *Profiler) GetLevel() ProfilingLevel {
-	return p.level
-}

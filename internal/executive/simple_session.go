@@ -1270,14 +1270,6 @@ func (s *SimpleSession) ShouldReset() bool {
 	return false
 }
 
-func truncatePrompt(s string, maxLen int) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
-}
-
 // safeUsage extracts the usage map from a ResultMessage, returning nil if absent.
 func safeUsage(m *claudecode.ResultMessage) map[string]any {
 	if m.Usage == nil {

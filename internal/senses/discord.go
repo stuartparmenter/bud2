@@ -343,13 +343,6 @@ func (d *DiscordSense) ConnectionHealth() (connected bool, disconnectCount int, 
 	return d.connected, d.disconnectCount, d.lastConnected, d.lastDisconnected
 }
 
-// SetMaxDisconnectDuration sets how long to tolerate disconnection before hard reset
-func (d *DiscordSense) SetMaxDisconnectDuration(dur time.Duration) {
-	d.mu.Lock()
-	d.maxDisconnectDur = dur
-	d.mu.Unlock()
-}
-
 // SetOnProlongedOutage sets a callback that fires when disconnected for too long
 // The callback receives the duration of the outage. This is called BEFORE hard reset.
 func (d *DiscordSense) SetOnProlongedOutage(callback func(duration time.Duration)) {

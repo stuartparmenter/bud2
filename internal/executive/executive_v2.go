@@ -741,13 +741,6 @@ func (e *ExecutiveV2) SignalDone() {
 	}
 }
 
-// ProcessItem processes a specific pending item
-func (e *ExecutiveV2) ProcessItem(ctx context.Context, item *focus.PendingItem) error {
-	e.attention.Focus(item)
-	defer e.attention.Complete()
-	return e.processItem(ctx, []*focus.PendingItem{item})
-}
-
 // processItem handles one or more focus items as a single batch.
 // items[0] is the primary item and drives channel, typing indicator, and session decisions.
 func (e *ExecutiveV2) processItem(ctx context.Context, items []*focus.PendingItem) error {

@@ -89,8 +89,6 @@ func printResult(r result) {
 	}
 }
 
-func ptr[T any](v T) *T { return &v }
-
 // isIgnorableIterError returns true for non-fatal errors from iter.Next/ReceiveMessages
 // that should be skipped rather than treated as session failures.
 func isIgnorableIterError(err error) bool {
@@ -103,25 +101,6 @@ func isIgnorableIterError(err error) bool {
 		return true
 	}
 	return false
-}
-
-// drainMessages collects all text and the ResultMessage from a client's ReceiveMessages channel.
-func drainMessages(ctx context.Context, ch <-chan claudecode.Message) (text string, sessionID string, usage *map[string]any) {
-	var sb strings.Builder
-	for msg := range ch {
-		switch m := msg.(type) {
-		case *claudecode.AssistantMessage:
-			for _, block := range m.Content {
-				if tb, ok := block.(*claudecode.TextBlock); ok {
-					sb.WriteString(tb.Text)
-				}
-			}
-		case *claudecode.ResultMessage:
-			sessionID = m.SessionID
-			usage = m.Usage
-		}
-	}
-	return sb.String(), sessionID, usage
 }
 
 // ---------------------------------------------------------------------------

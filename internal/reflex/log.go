@@ -1,6 +1,7 @@
 package reflex
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -170,27 +171,15 @@ func (l *Log) AddEntry(entry LogEntry) {
 
 	// Persist to disk if path is set
 	if l.path != "" {
-		l.appendToDisk(entry)
+		filePath := filepath.Join(l.path, "reflex_log.jsonl")
+		if f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+			defer f.Close()
+			if data, err := json.Marshal(entry); err == nil {
+				f.Write(data)
+				f.WriteString("\n")
+			}
+		}
 	}
-}
-
-// appendToDisk appends a single entry to the JSONL log file
-func (l *Log) appendToDisk(entry LogEntry) {
-	filePath := filepath.Join(l.path, "reflex_log.jsonl")
-
-	f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return // Silent fail - logging shouldn't break the system
-	}
-	defer f.Close()
-
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return
-	}
-
-	f.Write(data)
-	f.WriteString("\n")
 }
 
 // Load loads recent entries from disk
@@ -213,7 +202,8 @@ func (l *Log) Load() error {
 
 	// Parse JSONL (only load recent entries up to maxSize)
 	var entries []LogEntry
-	for _, line := range splitLines(data) {
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		line = bytes.TrimRight(line, "\r")
 		if len(line) == 0 {
 			continue
 		}
@@ -232,26 +222,6 @@ func (l *Log) Load() error {
 	l.entries = entries
 	l.lastSent = len(entries) - 1 // Mark all loaded as "sent"
 	return nil
-}
-
-// splitLines splits byte data into lines (handles both \n and \r\n)
-func splitLines(data []byte) [][]byte {
-	var lines [][]byte
-	start := 0
-	for i := 0; i < len(data); i++ {
-		if data[i] == '\n' {
-			end := i
-			if end > start && data[end-1] == '\r' {
-				end--
-			}
-			lines = append(lines, data[start:end])
-			start = i + 1
-		}
-	}
-	if start < len(data) {
-		lines = append(lines, data[start:])
-	}
-	return lines
 }
 
 // GetAll returns all entries (for debugging/inspection)
