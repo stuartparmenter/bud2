@@ -25,7 +25,6 @@ import (
 	"github.com/vthunder/bud2/internal/logging"
 	"github.com/vthunder/bud2/internal/paths"
 	"github.com/vthunder/bud2/internal/profiling"
-	"github.com/vthunder/bud2/internal/reflex"
 )
 
 // ExecutiveV2 is the simplified executive using focus-based attention
@@ -47,9 +46,6 @@ type ExecutiveV2 struct {
 
 	// Memory system (Engram HTTP client)
 	memory *engram.Client
-
-	// Reflex log for context
-	reflexLog *reflex.Log
 
 	// Subagent session manager (Project 2)
 	subagents *SubagentManager
@@ -146,7 +142,6 @@ type ExecutiveV2Config struct {
 // NewExecutiveV2 creates a new v2 executive
 func NewExecutiveV2(
 	memory *engram.Client,
-	reflexLog *reflex.Log,
 	statePath string,
 	cfg ExecutiveV2Config,
 ) *ExecutiveV2 {
@@ -160,7 +155,6 @@ func NewExecutiveV2(
 		attention:      focus.New(),
 		queue:          focus.NewQueue(filepath.Join(statePath, "system"), 100),
 		memory:         memory,
-		reflexLog:      reflexLog,
 		subagents:      NewSubagentManager(statePath),
 		mcpToolCalled:  make(map[string]bool),
 		debugListeners: make(map[string]func(DebugEvent)),
@@ -1164,19 +1158,6 @@ func (e *ExecutiveV2) buildContext(items []*focus.PendingItem) *focus.ContextBun
 		}
 	}
 
-	// Get recent reflex activity
-	if e.reflexLog != nil {
-		entries := e.reflexLog.GetUnsent()
-		for _, entry := range entries {
-			bundle.ReflexLog = append(bundle.ReflexLog, focus.ReflexActivity{
-				Timestamp: entry.Timestamp,
-				Query:     entry.Query,
-				Response:  entry.Response,
-				Reflex:    entry.Reflex,
-			})
-		}
-	}
-
 	// Retrieve relevant memories from graph using dual-trigger (embedding + lexical)
 	// Filter out memories already sent in this session to avoid repetition
 	// For autonomous wakes, skip memory retrieval entirely - analysis shows 48% of wake
@@ -1656,16 +1637,6 @@ func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 	// Minimal prompts skip memories, schemas, reflex log, and conversation context.
 	// This applies to subagent-done, subagent-question, and short replies (yes/no/etc).
 	if !skipContext {
-		// Recent reflex activity
-		if len(bundle.ReflexLog) > 0 {
-			prompt.WriteString("## Recent Reflex Activity\n")
-			prompt.WriteString("(Handled by reflexes without executive involvement)\n")
-			for _, entry := range bundle.ReflexLog {
-				prompt.WriteString(fmt.Sprintf("- User: %s\n  Bud: %s\n", entry.Query, entry.Response))
-			}
-			prompt.WriteString("\n")
-		}
-
 		// Recalled memories (past context, not instructions)
 		// Only show NEW memories not already sent in this session
 		// Format with [xxxxx] engram prefix IDs for self-eval tracking

@@ -640,9 +640,6 @@ func main() {
 	reflexEngine.SetToolCaller(mcpServer)
 	log.Printf("[main] Reflex engine wired to MCP tool dispatcher")
 
-	// Initialize reflex log for short-term context
-	reflexLog := reflex.NewLog(20)
-
 	// Set up reflex reply callback (will wire to outbox after effector is created)
 	var reflexReplyCallback func(channelID, message string) error
 	reflexEngine.SetReplyCallback(func(channelID, message string) error {
@@ -659,8 +656,7 @@ func main() {
 	// Note: exec is already declared above so OnMCPToolCall can reference it
 	exec = executive.NewExecutiveV2(
 		engramClient, // HTTP client for memory retrieval (nil = disabled)
-		reflexLog,
-		statePath, // Executive will construct paths like state/system/core.md from this
+		statePath,    // Executive will construct paths like state/system/core.md from this
 		executive.ExecutiveV2Config{
 			Provider:                     executiveProvider,
 			AgentProvider:                agentProvider,
@@ -951,9 +947,6 @@ func main() {
 					content,
 					response,
 				)
-
-				// Add to reflex log for short-term context
-				reflexLog.Add(content, response, intent, result.ReflexName)
 
 				logging.Info("main", "Message from %s: %s → handler: reflex %s", author, logging.Truncate(content, 40), result.ReflexName)
 				return // Reflex handled it
