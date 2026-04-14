@@ -134,6 +134,58 @@ user-invocable: true
 
 After adding a skill, update the "Current skills" list in this guide so Bud can reference it without loading all skill files.
 
+## Skill Hooks
+
+Skills can register lifecycle hook scripts that Bud fires at key session events. Hooks allow a skill to inspect or mutate data at runtime without modifying core Bud code.
+
+### Directory convention
+
+Place hook scripts inside `hooks/bud/` within your skill directory:
+
+```
+state/system/plugins/<plugin>/skills/<name>/
+  SKILL.md
+  hooks/
+    bud/
+      SessionStart        # executed when a new executive session begins
+      UserPromptSubmit    # executed before each user prompt is assembled
+      Stop                # executed when Bud shuts down cleanly
+```
+
+Each file is named after the event it handles. Files must be executable (`chmod +x`).
+
+### Supported events (Phase 1)
+
+| Event | When fired | Payload fields |
+|---|---|---|
+| `SessionStart` | New executive session starts (not on resume) | `event`, `session_id` |
+| `UserPromptSubmit` | Before a user message is assembled into a prompt | `event`, `prompt` |
+| `Stop` | Bud shuts down cleanly | `event`, `session_id` |
+
+### Payload format
+
+Each script receives JSON on **stdin** and should write JSON to **stdout**:
+
+- Input always includes `"event"` with the event name plus event-specific fields.
+- Output is merged as the new payload for the next script in the chain (scripts are chained in discovery order).
+- For `UserPromptSubmit`, returning `{"prompt": "..."}` replaces the user's prompt text.
+- Scripts that exit non-zero log a warning and pass the payload through unchanged.
+- Timeout: 10 seconds per script.
+
+Example `UserPromptSubmit` hook that prefixes the prompt:
+
+```bash
+#!/usr/bin/env bash
+# hooks/bud/UserPromptSubmit
+input=$(cat)
+prompt=$(echo "$input" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['prompt'])")
+echo "{\"prompt\": \"[hooked] $prompt\"}"
+```
+
+### Multiple hooks for the same event
+
+If multiple skills register a handler for the same event, they form a chain. The output payload of one script becomes the input of the next. Discovery order is the order skill directories are resolved (local plugins first, then manifest plugins).
+
 ## Skill Grants
 
 Skill assignments for agents are controlled centrally in `state/system/skill-grants.yaml` rather than in individual agent YAML files. The `skills:` field has been removed from agent files — this is intentional.

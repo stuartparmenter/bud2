@@ -1,12 +1,16 @@
 package executive
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -173,17 +177,28 @@ func LoadSkillContent(pluginDirs []string, skillName string) (string, error) {
 	}
 
 	type match struct {
-		path    string
-		content string
+		path     string
+		skillDir string // absolute path of the skill's directory
+		content  string
 	}
 	var found []match
 
 	for _, dir := range pluginDirs {
-		for _, p := range []string{
-			filepath.Join(dir, "skills", shortName, "SKILL.md"),
-			filepath.Join(dir, "skills", shortName+".md"),
-		} {
-			data, err := os.ReadFile(p)
+		candidates := []struct {
+			path     string
+			skillDir string
+		}{
+			{
+				path:     filepath.Join(dir, "skills", shortName, "SKILL.md"),
+				skillDir: filepath.Join(dir, "skills", shortName),
+			},
+			{
+				path:     filepath.Join(dir, "skills", shortName+".md"),
+				skillDir: filepath.Join(dir, "skills"),
+			},
+		}
+		for _, c := range candidates {
+			data, err := os.ReadFile(c.path)
 			if err != nil {
 				continue
 			}
@@ -195,7 +210,9 @@ func LoadSkillContent(pluginDirs []string, skillName string) (string, error) {
 					content = strings.TrimSpace(rest[endIdx+5:])
 				}
 			}
-			found = append(found, match{path: p, content: content})
+			// Expand ${CLAUDE_SKILL_DIR} and !`...` shell injection blocks
+			content = expandSkillContent(content, c.skillDir)
+			found = append(found, match{path: c.path, skillDir: c.skillDir, content: content})
 			break // at most one match per dir
 		}
 	}
@@ -298,6 +315,51 @@ func LoadJob(statePath, ref string) (*JobDef, string, error) {
 }
 
 var jobPlaceholderRe = regexp.MustCompile(`\{\{(\w+)\}\}`)
+
+// skillInjectRe matches !`...` shell injection blocks in skill content.
+var skillInjectRe = regexp.MustCompile("!`([^`]+)`")
+
+// skillInjectMaxBytes is the maximum output bytes captured per injection block.
+const skillInjectMaxBytes = 64 * 1024
+
+// expandSkillContent expands ${CLAUDE_SKILL_DIR} and executes !`...` shell
+// injection blocks within skill content. The skillDir is the absolute path of
+// the directory containing the skill (e.g. the folder with SKILL.md).
+func expandSkillContent(content, skillDir string) string {
+	// 1. Expand ${CLAUDE_SKILL_DIR}
+	content = strings.ReplaceAll(content, "${CLAUDE_SKILL_DIR}", skillDir)
+
+	// 2. Pre-expand !`...` shell injection blocks
+	content = skillInjectRe.ReplaceAllStringFunc(content, func(m string) string {
+		sub := skillInjectRe.FindStringSubmatch(m)
+		if len(sub) < 2 {
+			return m
+		}
+		shellCmd := sub[1]
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		c := exec.CommandContext(ctx, "sh", "-c", shellCmd)
+		c.Dir = skillDir
+		c.Env = []string{"PATH=" + os.Getenv("PATH")}
+
+		var outBuf bytes.Buffer
+		c.Stdout = &outBuf
+
+		if err := c.Run(); err != nil {
+			return fmt.Sprintf("<!-- skill-inject-error: %v -->", err)
+		}
+
+		out := outBuf.Bytes()
+		if len(out) > skillInjectMaxBytes {
+			out = out[:skillInjectMaxBytes]
+		}
+		return strings.TrimRight(string(out), "\n")
+	})
+
+	return content
+}
 
 // RenderJobTemplate substitutes {{param}} placeholders with provided values.
 // Returns error if a required param is missing.

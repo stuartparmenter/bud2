@@ -73,6 +73,9 @@ type ExecutiveV2 struct {
 	signalDoneCancel func() // cancels current session when signal_done fires
 	signalDoneActive bool   // true when signal_done triggered the cancel
 
+	// Lifecycle hook runner (Phase 1 hooks: SessionStart, UserPromptSubmit, Stop)
+	hookRunner *HookRunner
+
 	// Debug event subscribers and history ring buffer
 	debugMu        sync.RWMutex
 	debugListeners map[string]func(DebugEvent)
@@ -190,6 +193,11 @@ func NewExecutiveV2(
 	} else {
 		log.Printf("[executive-v2] Warning: core.md not found in state or defaults")
 	}
+
+	// Discover lifecycle hooks from all plugin/skill dirs
+	hr := NewHookRunner()
+	hr.Discover(allPluginDirs(statePath))
+	exec.hookRunner = hr
 
 	return exec
 }
@@ -807,6 +815,13 @@ func (e *ExecutiveV2) processItem(ctx context.Context, items []*focus.PendingIte
 		}
 		e.session.PrepareNewSession()
 		e.session.SaveSessionToDisk() // persist cleared state immediately
+
+		// Fire SessionStart hook for new sessions
+		if e.hookRunner != nil {
+			e.hookRunner.Run("SessionStart", map[string]interface{}{
+				"session_id": e.session.SessionID(),
+			})
+		}
 	}
 
 	// Write wake header to the persistent log so each wake is clearly delimited.
@@ -820,6 +835,18 @@ func (e *ExecutiveV2) processItem(ctx context.Context, items []*focus.PendingIte
 			existing = claudeSessionID
 		}
 		e.config.OnExecWake(item.ID, truncate(item.Content, 100), existing)
+	}
+
+	// Fire UserPromptSubmit hook for user-originated items.
+	// Allows hooks to inspect or mutate the user's prompt text before context assembly.
+	if e.hookRunner != nil && (item.Priority == focus.P1UserInput || item.Source == "discord" || item.Source == "inbox") {
+		if result, err := e.hookRunner.Run("UserPromptSubmit", map[string]interface{}{
+			"prompt": item.Content,
+		}); err == nil {
+			if mutated, ok := result["prompt"].(string); ok && mutated != "" {
+				item.Content = mutated
+			}
+		}
 	}
 
 	// Build context bundle
@@ -1846,6 +1873,9 @@ func readHandoff(statePath string) string {
 // In -p mode, MCP tools are executed by the CLI internally — this callback
 // is for side-effects like session tracking, not for tool execution.
 // MCP tool names are prefixed: mcp__bud2__talk_to_user, mcp__bud2__signal_done, etc.
+//
+// TODO(hooks-phase2): wire PreToolUse / PostToolUse hooks here once the tool
+// call flow surfaces enough context (name, args, result) in a single callback.
 func (e *ExecutiveV2) handleToolCall(item *focus.PendingItem, name string, args map[string]any) (string, error) {
 	isTalkToUser := strings.HasSuffix(name, "talk_to_user") || strings.HasSuffix(name, "send_message") || strings.HasSuffix(name, "respond_to_user")
 	isNoise := isTalkToUser || name == "ToolSearch"
@@ -1914,6 +1944,13 @@ func (e *ExecutiveV2) TodayThinkingMinutes() float64 {
 
 // Stop shuts down the executive
 func (e *ExecutiveV2) Stop() error {
+	// Fire Stop hook before shutting down
+	if e.hookRunner != nil {
+		e.hookRunner.Run("Stop", map[string]interface{}{
+			"session_id": e.session.SessionID(),
+		})
+	}
+
 	// Cancel any active session so the subprocess is killed cleanly
 	e.InterruptCurrentSession()
 
