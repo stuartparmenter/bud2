@@ -410,11 +410,9 @@ func (e *ExecutiveV2) Start() error {
 // and adds a P2 focus item whenever a subagent needs user input.
 func (e *ExecutiveV2) watchSubagentQuestions() {
 	for session := range e.subagents.QuestionNotify {
-		session.mu.Lock()
-		question := session.pendingQuestion
+		question := session.PendingQuestion()
 		task := session.Task
 		sessionID := session.ID
-		session.mu.Unlock()
 
 		if question == "" {
 			continue
@@ -506,14 +504,12 @@ func parseAgentOutput(result string) *AgentOutput {
 // This wakes the executive to review results without interrupting user input.
 func (e *ExecutiveV2) watchSubagentDone() {
 	for session := range e.subagents.DoneNotify {
-		session.mu.Lock()
-		status := session.status
+		status := session.Status()
 		task := session.Task
 		sessionID := session.ID
-		result := session.result
+		result := session.Result()
 		workflowInstanceID := session.WorkflowInstanceID
 		workflowStep := session.WorkflowStep
-		session.mu.Unlock()
 
 		label := "completed"
 		if status == SubagentFailed {
@@ -1143,12 +1139,10 @@ func (e *ExecutiveV2) buildContext(items []*focus.PendingItem) *focus.ContextBun
 
 	// Collect any subagent sessions waiting for user input
 	for _, s := range e.subagents.List() {
-		s.mu.Lock()
-		waiting := s.status == SubagentWaitingForInput
-		q := s.pendingQuestion
+		waiting := s.Status() == SubagentWaitingForInput
+		q := s.PendingQuestion()
 		task := s.Task
 		sid := s.ID
-		s.mu.Unlock()
 		if waiting && q != "" {
 			bundle.SubagentQuestions = append(bundle.SubagentQuestions, focus.SubagentQuestion{
 				SessionID: sid,

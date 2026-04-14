@@ -157,13 +157,6 @@ func (s *SubagentSession) Events(n int) []SubagentEvent {
 	return out
 }
 
-// LastEventAt returns the timestamp of the most recent recorded event.
-func (s *SubagentSession) LastEventAt() time.Time {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.lastEventAt
-}
-
 // AddStagedMemory records a thought intercepted from a save_thought call.
 func (s *SubagentSession) AddStagedMemory(content string) {
 	s.mu.Lock()
@@ -401,11 +394,9 @@ func (m *SubagentManager) Stop(sessionID string) error {
 	if !ok {
 		return fmt.Errorf("subagent session not found: %s", sessionID)
 	}
-	session.mu.Lock()
-	done := session.status == SubagentCompleted || session.status == SubagentFailed || session.status == SubagentStopped
-	session.mu.Unlock()
-	if done {
-		return fmt.Errorf("subagent %s is already finished (status: %s)", sessionID, session.status)
+	st := session.Status()
+	if st == SubagentCompleted || st == SubagentFailed || st == SubagentStopped {
+		return fmt.Errorf("subagent %s is already finished (status: %s)", sessionID, st)
 	}
 	log.Printf("[subagent-manager] Stopping session %s on request", sessionID)
 	session.mu.Lock()
@@ -422,10 +413,9 @@ func (m *SubagentManager) Cleanup(olderThan time.Duration) int {
 	cutoff := time.Now().Add(-olderThan)
 	var removed int
 	for id, s := range m.sessions {
-		s.mu.Lock()
-		done := s.status == SubagentCompleted || s.status == SubagentFailed || s.status == SubagentStopped
+		st := s.Status()
+		done := st == SubagentCompleted || st == SubagentFailed || st == SubagentStopped
 		old := s.SpawnedAt.Before(cutoff)
-		s.mu.Unlock()
 		if done && old {
 			delete(m.sessions, id)
 			removed++
