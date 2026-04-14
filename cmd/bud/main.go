@@ -343,7 +343,7 @@ func main() {
 	// }
 	if err := profiling.Init(profileLevel, filepath.Join(statePath, "system", "profiling.jsonl")); err != nil {
 		log.Printf("Warning: failed to initialize profiler: %v", err)
-	} else if profileLevel != profiling.LevelOff {
+	} else if profiling.Get().IsEnabled() {
 		log.Printf("[profiling] Enabled at level: %s", profileLevel)
 		defer profiling.Get().Close()
 	}
@@ -369,6 +369,11 @@ func main() {
 	if engramURL != "" {
 		engramClient = engram.NewClient(engramURL, engramAPIKey)
 		log.Printf("[main] Engram client initialized: %s", engramURL)
+		if err := engramClient.Health(); err != nil {
+			log.Printf("[main] Warning: engram health check failed: %v", err)
+		} else {
+			log.Printf("[main] Engram health check OK")
+		}
 	} else {
 		log.Println("[main] Warning: ENGRAM_URL not set, executive memory retrieval disabled")
 	}
@@ -402,6 +407,9 @@ func main() {
 	todayUsage := sessionTracker.TodayTokenUsage()
 	log.Printf("[main] Session tracker initialized (output tokens today: %dk, budget: %dk, sessions: %d)",
 		todayUsage.OutputTokens/1000, dailyOutputTokenBudget/1000, todayUsage.SessionCount)
+	if sessionTracker.HasActiveSessions() {
+		log.Printf("[main] Warning: session tracker has active sessions at startup — possible unclean shutdown")
+	}
 
 	// Initialize reflex engine
 	reflexEngine := reflex.NewEngine(statePath)
@@ -711,6 +719,13 @@ func main() {
 	if err := exec.Start(); err != nil {
 		log.Fatalf("Failed to start executive: %v", err)
 	}
+	log.Printf("[main] Executive started (active_sessions=%v, thinking_min_today=%.1f)",
+		exec.HasActiveSessions(), exec.TodayThinkingMinutes())
+
+	// Validate agent alias targets at startup — logs errors for broken aliases.
+	if !executive.ValidateAliasTargets(statePath) {
+		log.Printf("[main] Warning: some agent aliases have unresolvable targets (see above)")
+	}
 
 	// Open the single persistent executive log pane exactly once at startup.
 	// All wakes append to the same file; context clears do not open a new pane.
@@ -898,7 +913,9 @@ func main() {
 		var handled bool
 		var results []*reflex.ReflexResult
 		func() {
-			defer profiling.Get().Start(perceptID, "percept.reflex_check")()
+			if profiling.Get().ShouldProfile(profiling.LevelDetailed) {
+				defer profiling.Get().Start(perceptID, "percept.reflex_check")()
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			handled, results = reflexEngine.Process(ctx, percept.Source, percept.Type, content, percept.Data)
@@ -960,6 +977,7 @@ func main() {
 
 			if !isUrgent {
 				if ok, reason := thinkingBudget.CanDoAutonomousWork(); !ok {
+					activityLog.LogDecision("Skip autonomous work", reason, "budget check", "blocked")
 					logging.Debug("main", "Autonomous percept blocked: %s", reason)
 					return
 				}
@@ -1168,13 +1186,21 @@ func main() {
 
 	// Start health monitor for connection resilience
 	discordSense.SetOnProlongedOutage(func(duration time.Duration) {
+		connected, disconnectCount, lastConnected, lastDisconnected := discordSense.ConnectionHealth()
 		activityLog.LogError(
 			fmt.Sprintf("Discord disconnected for %v, triggering hard reset", duration.Round(time.Second)),
 			fmt.Errorf("prolonged disconnection"),
-			map[string]any{"duration": duration.String()},
+			map[string]any{
+				"duration":          duration.String(),
+				"connected":         connected,
+				"disconnect_count":  disconnectCount,
+				"last_connected":    lastConnected,
+				"last_disconnected": lastDisconnected,
+			},
 		)
 	})
 	discordSense.StartHealthMonitor()
+	log.Printf("[discord] initial connected=%v", discordSense.IsConnected())
 
 	// Wire up typing indicator to executive
 	exec.SetTypingCallbacks(discordEffector.StartTyping, discordEffector.StopTyping)
