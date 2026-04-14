@@ -202,6 +202,23 @@ func NewExecutiveV2(
 	return exec
 }
 
+// PostToolUseHook returns a callback suitable for mcp.Server.SetPostToolHook.
+// It fires the PostToolUse lifecycle hooks with the actual tool result.
+// Returns nil if no hook runner is configured.
+func (e *ExecutiveV2) PostToolUseHook() func(name string, args map[string]any, result string, isError bool) {
+	if e.hookRunner == nil {
+		return nil
+	}
+	return func(name string, args map[string]any, result string, isError bool) {
+		_, _ = e.hookRunner.Run("PostToolUse", map[string]interface{}{
+			"tool_name":   name,
+			"tool_input":  args,
+			"tool_output": result,
+			"is_error":    isError,
+		})
+	}
+}
+
 // SetKnownMCPTools sets the list of MCP tool names (with full mcp__<server>__
 // prefix) used to expand wildcard patterns in plugins.yaml tool_grants.
 // Call this after all MCP tools have been registered.
@@ -1876,8 +1893,8 @@ func readHandoff(statePath string) string {
 //
 // PreToolUse hooks can block a tool call (exit code 1); when blocked the current
 // session context is cancelled so no further tool execution occurs.
-// PostToolUse hooks are fired asynchronously; tool results are not available in
-// SDK -p mode (the CLI handles execution internally).
+// PostToolUse hooks fire from the MCP server dispatch (not here) so that the
+// actual tool_output is available to hook scripts.
 func (e *ExecutiveV2) handleToolCall(item *focus.PendingItem, name string, args map[string]any) (string, error) {
 	isTalkToUser := strings.HasSuffix(name, "talk_to_user") || strings.HasSuffix(name, "send_message") || strings.HasSuffix(name, "respond_to_user")
 	isNoise := isTalkToUser || name == "ToolSearch"
@@ -1899,16 +1916,6 @@ func (e *ExecutiveV2) handleToolCall(item *focus.PendingItem, name string, args 
 			return "blocked by PreToolUse hook", nil
 		}
 
-		// PostToolUse: fire informational notification asynchronously.
-		// tool_result is absent because the SDK does not surface per-tool results.
-		hookName := name
-		hookArgs := args
-		go func() {
-			_, _ = e.hookRunner.Run("PostToolUse", map[string]interface{}{
-				"tool_name":  hookName,
-				"tool_input": hookArgs,
-			})
-		}()
 	}
 
 	// Match both bare names (legacy) and MCP-prefixed names

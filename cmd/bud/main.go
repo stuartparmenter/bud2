@@ -716,6 +716,10 @@ func main() {
 		exec.SetKnownMCPTools(prefixed)
 	}
 
+	// Wire PostToolUse lifecycle hooks into the MCP server so hook scripts
+	// receive the actual tool output (not fired from the observer path).
+	mcpServer.SetPostToolHook(exec.PostToolUseHook())
+
 	if err := exec.Start(); err != nil {
 		log.Fatalf("Failed to start executive: %v", err)
 	}

@@ -42,6 +42,11 @@ type Server struct {
 	// Extra HTTP handlers registered via RegisterHTTPHandler
 	extraHandlers map[string]http.HandlerFunc
 
+	// postToolHook is called after each tool call with the name, input args,
+	// result text, and whether the call was an error. Used to fire PostToolUse
+	// lifecycle hooks with the actual tool result.
+	postToolHook func(name string, args map[string]any, result string, isError bool)
+
 	// Resource provider callbacks (optional). Domain comes from session token.
 	// resourceLister lists available resources for a domain.
 	// resourceReader reads a single resource by URI for a domain.
@@ -83,6 +88,12 @@ func NewServer() *Server {
 		reader:        bufio.NewReader(os.Stdin),
 		writer:        os.Stdout,
 	}
+}
+
+// SetPostToolHook registers a callback that fires after each tool call with
+// the tool name, input args, result text, and error flag. Pass nil to clear.
+func (s *Server) SetPostToolHook(fn func(name string, args map[string]any, result string, isError bool)) {
+	s.postToolHook = fn
 }
 
 // RegisterSession maps a session token to an agent ID and default domain.
@@ -435,14 +446,22 @@ func (s *Server) handleToolsCall(req jsonRPCRequest) *jsonRPCResponse {
 
 	result, err := handler(s.context, params.Arguments)
 	if err != nil {
+		errText := fmt.Sprintf("Error: %v", err)
+		if s.postToolHook != nil {
+			go s.postToolHook(params.Name, params.Arguments, errText, true)
+		}
 		return &jsonRPCResponse{
 			JSONRPC: "2.0",
 			ID:      req.ID,
 			Result: toolsCallResult{
-				Content: []contentBlock{{Type: "text", Text: fmt.Sprintf("Error: %v", err)}},
+				Content: []contentBlock{{Type: "text", Text: errText}},
 				IsError: true,
 			},
 		}
+	}
+
+	if s.postToolHook != nil {
+		go s.postToolHook(params.Name, params.Arguments, result, false)
 	}
 
 	return &jsonRPCResponse{
