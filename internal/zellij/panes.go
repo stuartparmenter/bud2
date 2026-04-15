@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,9 +55,14 @@ var _ terminal.Manager = (*Manager)(nil)
 var execWindowOnce sync.Once
 
 // EnsureExecWindow opens the persistent executive log pane exactly once per
-// process lifetime. Subsequent calls are no-ops.
+// process lifetime. Subsequent calls are no-ops. If a tail process is already
+// following the log (e.g. from a previous bud process), the pane is skipped.
 func (m *Manager) EnsureExecWindow(logPath string) {
 	execWindowOnce.Do(func() {
+		if isTailRunning(logPath) {
+			log.Printf("[zellij] exec pane already tailing %s, skipping", logPath)
+			return
+		}
 		openPane("bud-exec", "tail -n +1 -F "+logPath)
 	})
 }
@@ -111,4 +117,15 @@ func ensureTab() error {
 		"--session", zellijSession,
 		"action", "go-to-tab-name", tabName, "--create",
 	).Run()
+}
+
+// isTailRunning returns true if there is already a tail process following the
+// given log file. This prevents duplicate panes when bud restarts while an
+// existing tail pane is still open in zellij.
+func isTailRunning(logPath string) bool {
+	out, err := exec.Command("pgrep", "-f", "tail.*-F.*"+logPath).Output()
+	if err != nil {
+		return false
+	}
+	return len(strings.TrimSpace(string(out))) > 0
 }
