@@ -1729,6 +1729,15 @@ func (e *ExecutiveV2) buildPrompt(bundle *focus.ContextBundle) string {
 			prompt.WriteString("\n")
 		}
 
+		// Recent reflex activity
+		if len(bundle.ReflexLog) > 0 {
+			prompt.WriteString("## Recent Reflex Activity\n")
+			for _, r := range bundle.ReflexLog {
+				prompt.WriteString(fmt.Sprintf("- Q: %s\n  A: %s\n", r.Query, r.Response))
+			}
+			prompt.WriteString("\n")
+		}
+
 		// Conversation buffer: only on fresh sessions. When resuming, the full
 		// conversation history is already loaded from the Claude session file.
 		if !isResuming && bundle.BufferContent != "" {

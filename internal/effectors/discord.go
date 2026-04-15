@@ -107,6 +107,11 @@ func (e *DiscordEffector) SetOnRetry(callback func(actionID, actionType, errMsg 
 	e.onRetry = callback
 }
 
+// SetMaxRetryDuration sets the maximum total duration to retry transient failures.
+func (e *DiscordEffector) SetMaxRetryDuration(d time.Duration) {
+	e.maxRetryDuration = d
+}
+
 // SetPendingInteractionCallback sets the callback for retrieving pending slash command interactions
 func (e *DiscordEffector) SetPendingInteractionCallback(callback func(channelID string) *PendingInteraction) {
 	e.getPendingInteraction = callback

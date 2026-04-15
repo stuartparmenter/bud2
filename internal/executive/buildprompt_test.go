@@ -13,7 +13,7 @@ import (
 func newTestExecutive(t *testing.T) *ExecutiveV2 {
 	t.Helper()
 	statePath := t.TempDir()
-	return NewExecutiveV2(nil, nil, statePath, ExecutiveV2Config{})
+	return NewExecutiveV2(nil, statePath, ExecutiveV2Config{})
 }
 
 // TestBuildPrompt_NonConflictFormatting verifies that normal memories
@@ -432,7 +432,7 @@ func TestBuildPrompt_BatchedMessages(t *testing.T) {
 // WakeupInstructions and WakeSessionContext into the prompt.
 func TestBuildPrompt_WakeFocus(t *testing.T) {
 	statePath := t.TempDir()
-	exec := NewExecutiveV2(nil, nil, statePath, ExecutiveV2Config{
+	exec := NewExecutiveV2(nil, statePath, ExecutiveV2Config{
 		WakeupInstructions: "# Autonomous Wake\nCheck tasks and do background work.",
 	})
 

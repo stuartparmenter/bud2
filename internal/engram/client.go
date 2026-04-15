@@ -438,6 +438,100 @@ func (c *Client) post(path string, body any, out any) error {
 	return nil
 }
 
+// IngestThought stores a short thought and returns its ID.
+func (c *Client) IngestThought(content string) (*IngestResult, error) {
+	body := map[string]string{"content": content}
+	var result IngestResult
+	if err := c.post("/v1/thoughts", body, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetUnconsolidatedEpisodeCount returns the number of unconsolidated episodes.
+func (c *Client) GetUnconsolidatedEpisodeCount() (int, error) {
+	var out struct {
+		Count int `json:"count"`
+	}
+	if err := c.get("/v1/episodes/count", nil, &out); err != nil {
+		return 0, err
+	}
+	return out.Count, nil
+}
+
+// ListEntities returns entities, optionally filtered by type.
+// entityType="" returns all types. limit<=0 uses the server default.
+func (c *Client) ListEntities(entityType string, limit int) ([]*Entity, error) {
+	params := url.Values{}
+	if entityType != "" {
+		params.Set("type", entityType)
+	}
+	if limit > 0 {
+		params.Set("limit", strconv.Itoa(limit))
+	}
+	var entities []*Entity
+	if err := c.get("/v1/entities", params, &entities); err != nil {
+		return nil, err
+	}
+	return entities, nil
+}
+
+// Consolidate triggers memory consolidation and returns the result.
+func (c *Client) Consolidate() (*ConsolidateResult, error) {
+	var result ConsolidateResult
+	if err := c.post("/v1/consolidate", nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// DecayActivation decays trace activation by the given lambda.
+// threshold=0 uses the server default.
+func (c *Client) DecayActivation(lambda, threshold float64) (*DecayResult, error) {
+	body := map[string]any{"lambda": lambda}
+	if threshold > 0 {
+		body["threshold"] = threshold
+	}
+	var result DecayResult
+	if err := c.post("/v1/activation/decay", body, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Reset clears all memory state.
+func (c *Client) Reset() error {
+	req, err := http.NewRequest(http.MethodDelete, c.baseURL+"/v1/memory/reset", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	return c.parseError(resp)
+}
+
+// Flush flushes pending memory writes.
+func (c *Client) Flush() error {
+	return c.post("/v1/memory/flush", nil, nil)
+}
+
+// ReinforceTrace reinforces a trace, optionally linking it to specific episodes.
+// episodes may be nil. alpha controls reinforcement strength.
+func (c *Client) ReinforceTrace(id string, episodes []string, alpha float64) error {
+	body := map[string]any{"alpha": alpha}
+	if len(episodes) > 0 {
+		body["episode_ids"] = episodes
+	}
+	return c.post("/v1/engrams/"+url.PathEscape(id)+"/reinforce", body, nil)
+}
+
 // RateEngrams feeds executive memory ratings back to engram.
 // ratings maps trace ID to raw rating 1–5.
 func (c *Client) RateEngrams(ratings map[string]int) error {
