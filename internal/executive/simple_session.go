@@ -74,6 +74,12 @@ func (s *SimpleSession) SendPrompt(ctx context.Context, prompt string, cb provid
 // higher-priority item (e.g. a P1 user message arriving during a background wake).
 var ErrInterrupted = errors.New("session interrupted by higher-priority item")
 
+// ErrSessionFallback is returned by SendPromptWithCfg when the Claude session
+// expired or was broken server-side. The prompt was built for a resumed session
+// (without the conversation buffer), so the caller must rebuild the prompt with
+// isResuming=false and retry. The session state has already been cleared.
+var ErrSessionFallback = errors.New("session fallback: session expired, rebuild prompt and retry")
+
 // scanLocalPlugins returns the absolute path of each plugin directory under
 // state/system/plugins/ that contains a .claude-plugin/plugin.json file.
 // These are passed to Claude Code via --plugin-dir so skills are loaded without
@@ -1233,26 +1239,28 @@ func (s *SimpleSession) SendPromptWithCfg(ctx context.Context, prompt string, cf
 	err := sendWithOpts(opts)
 
 	// Graceful recovery: if --resume pointed at a session that no longer exists,
-	// clear the session ID and retry without it so the wake doesn't fail entirely.
+	// signal the caller to rebuild the prompt (without isResuming) and retry.
+	// We cannot retry here with the same prompt — it was built without the
+	// conversation buffer because isResuming was true at buildPrompt time.
 	if err != nil && s.isResuming && isSessionNotFoundError(err) {
-		log.Printf("[simple-session] WARNING: Claude session %s not found, starting fresh", s.claudeSessionID)
+		log.Printf("[simple-session] WARNING: Claude session %s not found, signaling caller for fresh-prompt retry", s.claudeSessionID)
 		s.claudeSessionID = ""
 		s.isResuming = false
-		writeLog(logFile, "WARNING: session not found, retrying without --resume")
-		err = sendWithOpts(baseOpts)
+		writeLog(logFile, "WARNING: session not found, returning ErrSessionFallback for caller-driven retry")
+		return ErrSessionFallback
 	}
 
 	// Detect broken/cascading sessions: a resumed session that returns 0 turns with 0
 	// tokens (and the context wasn't cancelled) means the session is in a bad server-side
-	// state and will continue to cascade. Clear the session ID and retry fresh.
+	// state and will continue to cascade. Signal the caller to rebuild and retry.
 	if err == nil && ctx.Err() == nil && s.isResuming &&
 		s.lastUsage != nil && s.lastUsage.NumTurns == 0 &&
 		s.lastUsage.InputTokens == 0 && s.lastUsage.OutputTokens == 0 {
-		log.Printf("[simple-session] WARNING: resumed session %s returned 0 turns/tokens, session may be corrupted — retrying fresh", s.claudeSessionID)
+		log.Printf("[simple-session] WARNING: resumed session %s returned 0 turns/tokens, signaling caller for fresh-prompt retry", s.claudeSessionID)
 		s.claudeSessionID = ""
 		s.isResuming = false
-		writeLog(logFile, "WARNING: 0-turn resume detected, retrying without --resume")
-		err = sendWithOpts(baseOpts)
+		writeLog(logFile, "WARNING: 0-turn resume detected, returning ErrSessionFallback for caller-driven retry")
+		return ErrSessionFallback
 	}
 
 	if err != nil {

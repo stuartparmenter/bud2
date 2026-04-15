@@ -1016,6 +1016,23 @@ func (e *ExecutiveV2) processItem(ctx context.Context, items []*focus.PendingIte
 				log.Printf("[executive] Background session interrupted by P1 item")
 				return nil
 			}
+		} else if errors.Is(sendErr, ErrSessionFallback) {
+			// Claude session expired or was broken server-side. isResuming was cleared
+			// inside SendPromptWithCfg. Rebuild the prompt (now with conversation buffer)
+			// and retry once without --resume.
+			log.Printf("[executive-v2] Session fallback: rebuilding prompt with conversation buffer and retrying")
+			output.Reset()
+			thinkingBlocks = thinkingBlocks[:0]
+			e.mcpToolCalled = make(map[string]bool)
+			prompt = e.buildPrompt(bundle)
+			e.session.WriteSessionLogEntry("RETRY PROMPT (session fallback, %d chars):\n%s\n=== END PROMPT ===", len(prompt), prompt)
+			func() {
+				defer profiling.Get().Start(item.ID, "executive.claude_api_retry")()
+				sendErr = e.session.SendPromptWithCfg(sessionCtx, prompt, claudeCfg)
+			}()
+			if sendErr != nil {
+				return fmt.Errorf("prompt retry after session fallback failed: %w", sendErr)
+			}
 		} else {
 			return fmt.Errorf("prompt failed: %w", sendErr)
 		}
