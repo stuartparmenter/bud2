@@ -161,8 +161,8 @@ func (c *CalendarSense) poll() {
 	// Check for daily agenda (send once per day, in the morning)
 	c.checkDailyAgenda(ctx)
 
-	// Check for prediction review impulse (send once per day at 14:00)
-	c.checkPredictionReview()
+	// Disabled: prediction review impulse — will be recreated as a scheduled extension
+	// c.checkPredictionReview()
 
 	// Check for upcoming meetings that need reminders
 	c.checkUpcomingMeetings(ctx)
