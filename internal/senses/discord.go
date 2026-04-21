@@ -565,6 +565,21 @@ type SlashCommandInfo struct {
 	Description string // shown in Discord's autocomplete UI
 }
 
+// sanitizeSlashCommandDesc returns a Discord-safe description: single line, max 100 chars.
+// Falls back to fallback if desc is empty after sanitization.
+func sanitizeSlashCommandDesc(desc, fallback string) string {
+	// Collapse newlines and extra whitespace to a single space.
+	desc = strings.Join(strings.Fields(desc), " ")
+	if desc == "" {
+		desc = fallback
+	}
+	// Discord limit: 1–100 characters.
+	if len(desc) > 100 {
+		desc = desc[:97] + "..."
+	}
+	return desc
+}
+
 // RegisterSlashCommands registers application commands with Discord.
 // extensionCmds is appended after the built-in /stop and /debug-executive entries;
 // pass nil (or an empty slice) to register only the built-ins.
@@ -590,10 +605,7 @@ func (d *DiscordSense) RegisterSlashCommands(guildID string, extensionCmds []Sla
 	}
 
 	for _, ec := range extensionCmds {
-		desc := ec.Description
-		if desc == "" {
-			desc = ec.Command
-		}
+		desc := sanitizeSlashCommandDesc(ec.Description, ec.Command)
 		commands = append(commands, &discordgo.ApplicationCommand{
 			Name:        ec.Command,
 			Description: desc,
