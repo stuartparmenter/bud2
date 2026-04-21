@@ -24,5 +24,4 @@ trigger:
 pipeline:
   - type: invoke
     workflow: "gtd-{{intent}}"
-    params:
-      on_missing: escalate
+    on_missing: escalate

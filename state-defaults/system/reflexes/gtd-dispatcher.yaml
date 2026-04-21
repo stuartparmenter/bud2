@@ -31,14 +31,11 @@ params:
     required: false
 
 pipeline:
-  # Step 1: Invoke the sub-workflow named after the classified intent.
+  # Invoke the sub-workflow named after the classified intent.
   # {{intent}} is set by the Ollama classifier; if the sub-workflow doesn't
   # exist, escalate to the executive rather than failing silently.
+  # Sub-workflows (gtd-today, gtd-inbox, gtd-add) each send their own reply,
+  # so no reply step is needed here.
   - type: invoke
     workflow: "gtd-{{intent}}"
     on_missing: escalate
-    output: response
-
-  # Step 2: Reply with the sub-workflow's output.
-  - action: reply
-    message: "{{response}}"
