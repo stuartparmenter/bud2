@@ -124,6 +124,13 @@ func (d *DiscordSense) handleMessage(s *discordgo.Session, m *discordgo.MessageC
 		return
 	}
 
+	// Ignore slash command invocation messages (type 20) — these are already handled
+	// by handleInteraction via InteractionCreate. Without this filter, every slash
+	// command fires both handleInteraction AND handleMessage, waking the executive twice.
+	if m.Type == discordgo.MessageTypeChatInputCommand {
+		return
+	}
+
 	// Only process messages from configured channel (if set)
 	if d.channelID != "" && m.ChannelID != d.channelID {
 		return
