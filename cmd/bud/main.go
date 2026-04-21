@@ -1312,8 +1312,16 @@ func main() {
 	dbg := newExecutiveDebugger(exec, discordSense.Session())
 	discordSense.SetOnDebugExecutive(dbg.Toggle)
 
-	// Register slash commands (guild-specific for fast updates, or global if no guild ID)
-	if err := discordSense.RegisterSlashCommands(discordGuildID); err != nil {
+	// Collect slash commands from extension reflexes and register with Discord.
+	extReflexCmds := reflexEngine.ListSlashCommands()
+	extDiscordCmds := make([]senses.SlashCommandInfo, len(extReflexCmds))
+	for i, rc := range extReflexCmds {
+		extDiscordCmds[i] = senses.SlashCommandInfo{
+			Command:     rc.Command,
+			Description: rc.Description,
+		}
+	}
+	if err := discordSense.RegisterSlashCommands(discordGuildID, extDiscordCmds); err != nil {
 		log.Printf("Warning: failed to register slash commands: %v", err)
 	}
 

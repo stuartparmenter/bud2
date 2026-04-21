@@ -424,12 +424,20 @@ func (d *DiscordSense) handleInteraction(s *discordgo.Session, i *discordgo.Inte
 	cmdData := i.ApplicationCommandData()
 	cmdName := cmdData.Name
 
-	// Extract query from options (we use a single "query" option for most commands)
-	var query string
+	// Extract the argument string from the first string option, regardless of its name.
+	// Built-in commands (/stop, /debug-executive) have no options; extension commands use "args".
+	var args string
 	for _, opt := range cmdData.Options {
-		if opt.Name == "query" {
-			query = opt.StringValue()
+		if opt.Type == discordgo.ApplicationCommandOptionString {
+			args = opt.StringValue()
+			break
 		}
+	}
+
+	// Assemble content as "/<command> <args>" so inbox pattern-matching reflexes work.
+	query := "/" + cmdName
+	if args != "" {
+		query += " " + args
 	}
 
 	// Get user info
@@ -550,9 +558,26 @@ func (d *DiscordSense) SetOnStop(fn func()) {
 	d.onStop = fn
 }
 
-// RegisterSlashCommands registers application commands with Discord
-// If guildID is empty, commands are registered globally (takes up to 1 hour to propagate)
-func (d *DiscordSense) RegisterSlashCommands(guildID string) error {
+// SlashCommandInfo describes a slash command to register with Discord.
+// Extension reflexes supply these via the reflex engine.
+type SlashCommandInfo struct {
+	Command     string // slash command name (no leading slash)
+	Description string // shown in Discord's autocomplete UI
+}
+
+// RegisterSlashCommands registers application commands with Discord.
+// extensionCmds is appended after the built-in /stop and /debug-executive entries;
+// pass nil (or an empty slice) to register only the built-ins.
+// If guildID is empty, commands are registered globally (takes up to 1 hour to propagate).
+func (d *DiscordSense) RegisterSlashCommands(guildID string, extensionCmds []SlashCommandInfo) error {
+	optString := discordgo.ApplicationCommandOptionString
+	strOption := &discordgo.ApplicationCommandOption{
+		Type:        optString,
+		Name:        "args",
+		Description: "arguments",
+		Required:    false,
+	}
+
 	commands := []*discordgo.ApplicationCommand{
 		{
 			Name:        "stop",
@@ -562,6 +587,18 @@ func (d *DiscordSense) RegisterSlashCommands(guildID string) error {
 			Name:        "debug-executive",
 			Description: "Toggle a live debug stream of the executive session into a Discord thread",
 		},
+	}
+
+	for _, ec := range extensionCmds {
+		desc := ec.Description
+		if desc == "" {
+			desc = ec.Command
+		}
+		commands = append(commands, &discordgo.ApplicationCommand{
+			Name:        ec.Command,
+			Description: desc,
+			Options:     []*discordgo.ApplicationCommandOption{strOption},
+		})
 	}
 
 	appID := d.session.State.User.ID

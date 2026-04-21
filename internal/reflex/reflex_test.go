@@ -680,6 +680,43 @@ func TestDuplicateOutputNameRejected(t *testing.T) {
 	}
 }
 
+func TestListSlashCommands(t *testing.T) {
+	engine := NewEngine(t.TempDir())
+
+	engine.SaveReflex(&Reflex{
+		Name:        "gtd-dispatcher",
+		Description: "Dispatch GTD commands",
+		Trigger:     Trigger{SlashCommand: "gtd", Source: "inbox"},
+		Pipeline:    Pipeline{{Action: "template", Params: map[string]any{"template": "ok"}}},
+	})
+	engine.SaveReflex(&Reflex{
+		Name:    "no-slash",
+		Trigger: Trigger{Pattern: "hello"},
+		Pipeline: Pipeline{{Action: "template", Params: map[string]any{"template": "hi"}}},
+	})
+	// Reflex with slash_command but no description — should fall back to command name.
+	engine.SaveReflex(&Reflex{
+		Name:    "cal-handler",
+		Trigger: Trigger{SlashCommand: "cal", Source: "inbox"},
+		Pipeline: Pipeline{{Action: "template", Params: map[string]any{"template": "ok"}}},
+	})
+
+	cmds := engine.ListSlashCommands()
+	if len(cmds) != 2 {
+		t.Fatalf("expected 2 slash commands, got %d: %+v", len(cmds), cmds)
+	}
+	byName := make(map[string]SlashCommandInfo)
+	for _, c := range cmds {
+		byName[c.Command] = c
+	}
+	if byName["gtd"].Description != "Dispatch GTD commands" {
+		t.Errorf("gtd description: got %q", byName["gtd"].Description)
+	}
+	if byName["cal"].Description != "cal" {
+		t.Errorf("cal description fallback: got %q", byName["cal"].Description)
+	}
+}
+
 func TestExtensionSemaphore(t *testing.T) {
 	tmpDir := t.TempDir()
 	engine := NewEngine(tmpDir)

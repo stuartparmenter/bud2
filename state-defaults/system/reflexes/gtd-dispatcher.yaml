@@ -5,7 +5,7 @@ description: |
   (dispatcher pattern). Replaces the monolithic gtd-handler pipeline.
 priority: 10
 trigger:
-  source: discord
+  source: inbox
   slash_command: gtd
   classifier: ollama
   model: qwen2.5:7b

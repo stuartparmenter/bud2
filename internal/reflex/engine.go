@@ -300,6 +300,35 @@ func (e *Engine) SaveReflex(reflex *Reflex) error {
 	return nil
 }
 
+// SlashCommandInfo describes a slash command exported by a reflex trigger.
+type SlashCommandInfo struct {
+	Command     string // slash command name (no leading slash)
+	Description string // human-readable description for Discord registration
+}
+
+// ListSlashCommands returns the slash commands declared across all loaded reflexes.
+// Only reflexes with a non-empty trigger.slash_command field are included.
+func (e *Engine) ListSlashCommands() []SlashCommandInfo {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	var result []SlashCommandInfo
+	for _, r := range e.reflexes {
+		if r.Trigger.SlashCommand == "" {
+			continue
+		}
+		desc := r.Description
+		if desc == "" {
+			desc = r.Trigger.SlashCommand
+		}
+		result = append(result, SlashCommandInfo{
+			Command:     r.Trigger.SlashCommand,
+			Description: desc,
+		})
+	}
+	return result
+}
+
 // Match finds all reflexes that match a percept
 func (e *Engine) Match(source, typ, content string) []*Reflex {
 	e.mu.RLock()
