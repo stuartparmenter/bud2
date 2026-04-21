@@ -1341,21 +1341,28 @@ func main() {
 	dbg := newExecutiveDebugger(exec, discordSense.Session())
 	discordSense.SetOnDebugExecutive(dbg.Toggle)
 
-	// Collect slash commands from extension reflexes and register with Discord.
-	extReflexCmds := reflexEngine.ListSlashCommands()
-	extDiscordCmds := make([]senses.SlashCommandInfo, len(extReflexCmds))
-	for i, rc := range extReflexCmds {
-		extDiscordCmds[i] = senses.SlashCommandInfo{
-			Command:     rc.Command,
-			Description: rc.Description,
+	// Collect slash commands from extension reflexes and Dispatcher, deduplicated by name.
+	// Reflex engine entries take priority; Dispatcher adds any not already present.
+	seenCmds := make(map[string]bool)
+	var extDiscordCmds []senses.SlashCommandInfo
+	for _, rc := range reflexEngine.ListSlashCommands() {
+		if !seenCmds[rc.Command] {
+			seenCmds[rc.Command] = true
+			extDiscordCmds = append(extDiscordCmds, senses.SlashCommandInfo{
+				Command:     rc.Command,
+				Description: rc.Description,
+			})
 		}
 	}
 	if dispatcher != nil {
 		for _, dc := range dispatcher.ListSlashCommands() {
-			extDiscordCmds = append(extDiscordCmds, senses.SlashCommandInfo{
-				Command:     dc.Command,
-				Description: dc.Description,
-			})
+			if !seenCmds[dc.Command] {
+				seenCmds[dc.Command] = true
+				extDiscordCmds = append(extDiscordCmds, senses.SlashCommandInfo{
+					Command:     dc.Command,
+					Description: dc.Description,
+				})
+			}
 		}
 	}
 	if err := discordSense.RegisterSlashCommands(discordGuildID, extDiscordCmds); err != nil {
