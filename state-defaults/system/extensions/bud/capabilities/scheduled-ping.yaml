@@ -1,0 +1,7 @@
+name: scheduled-ping
+description: Test capability for scheduled trigger — sends a ping every minute
+type: workflow
+callable_from: direct
+pipeline:
+  - action: reply
+    message: "📡 Scheduled ping — schedule triggers are working!"

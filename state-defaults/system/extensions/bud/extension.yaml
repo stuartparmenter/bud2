@@ -54,6 +54,10 @@ capabilities:
   startup:
     callable_from: both
 
+  # Test capabilities
+  scheduled-ping:
+    callable_from: direct
+
 behaviors:
   - name: calendar-handler
     trigger:
@@ -92,3 +96,9 @@ behaviors:
       event_type: recurring
       pattern: "Sync state to git"
     workflow: bud:state-sync
+
+  - name: scheduled-ping
+    trigger:
+      type: schedule
+      cron: "* * * * *"
+    workflow: bud:scheduled-ping
